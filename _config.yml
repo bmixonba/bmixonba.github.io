@@ -21,10 +21,11 @@ author: Benjamin Mixon-Baca
 
 navbar-links:
   About Me: "aboutme"
-  Resources:
-    - Beautiful Jekyll: "https://beautifuljekyll.com"
+  Research:
+    - Attacking Connection Tracking Frameworks: "https://petsymposium.org/popets/2024/popets-2024-0070.php"
     - Learn markdown: "https://www.markdowntutorial.com/"
-  Author's home: "https://deanattali.com"
+  Industry:
+  Non-profit Site: "https://breakpointingbad.com"
 
 ################
 # --- Logo --- #
@@ -259,7 +260,7 @@ date_format: "%B %-d, %Y"
 #################################################################################
 
 # Output options (more information on Jekyll's site)
-timezone: "America/Toronto"
+timezone: "America/Denver"
 markdown: kramdown
 highlighter: rouge
 permalink: /:year-:month-:day-:title/
