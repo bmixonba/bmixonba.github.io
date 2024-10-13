@@ -22,9 +22,9 @@ author: Benjamin Mixon-Baca
 navbar-links:
   About Me: "aboutme"
   Research:
-    - Attacking Connection Tracking Frameworks: "https://petsymposium.org/popets/2024/popets-2024-0070.php"
-    - Learn markdown: "https://www.markdowntutorial.com/"
-  Industry:
+    - Attacking VPNs: "https://petsymposium.org/popets/2024/popets-2024-0070.php"
+    - Port Shadow: "https://breakpointingbad.com/2021/09/08/Port-Shadows-via-Network-Alchemy.html"
+  Industry: "industry"
   Non-profit Site: "https://breakpointingbad.com"
 
 ################
