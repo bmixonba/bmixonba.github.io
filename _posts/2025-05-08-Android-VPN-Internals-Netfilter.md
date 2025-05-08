@@ -94,13 +94,13 @@ struct sk_buff {
 .
 .
 .
-#ifdef CONFIG\_NETWORK\_SECMARK
-	\_\_u32		secmark;
+#ifdef CONFIG_NETWORK_SECMARK
+	__u32		secmark;
 #endif
 
 	union {
-		\_\_u32		mark;
-		\_\_u32		reserved_tailroom;
+		__u32		mark;
+		__u32		reserved_tailroom;
 	};
 .
 .
