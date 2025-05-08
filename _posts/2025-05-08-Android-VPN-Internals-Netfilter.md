@@ -4,7 +4,7 @@ In this post, I will cover how Android implements its VPN functionality at the k
 
 # Background
 
-## Host Model: Strong Host Model versus Weak Host Model
+## Strong Host Model v Weak Host Model
 
 In computer networking, there are two ways of modeling how a device processes
 incoming unicast (TCP|UDP)/IP packets, the so-called `strong host` and
