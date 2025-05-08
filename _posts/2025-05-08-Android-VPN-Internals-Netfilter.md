@@ -34,7 +34,7 @@ weakhost model including Linux, Windows, FreeBSD, NetBSD, and DragonflyBSD[1].
 The benefit of a weak-host model is increased connectivity though it comes
 at the expense of security (typical... :{)
 
-## Routing Policy
+## Routing 
 
 When a machine recieves packets, either destined for it or some other machine (i.e., it is a router),
 the machine must decided where to route the packet. The strategies for routing packets are static routing,
@@ -48,11 +48,19 @@ determine where to route the packet.
 
 ### Dynamic Routing
 
-### Policy-based Routing
+### Policy-based Routing 
 
 Policy-based routing is the most computationlly expensive routing stategy because
 the machine must now inspect potentially the entire header and payload to decide
-to which host/NIC a packet should be routed.
+to which host/NIC a packet should be routed. Android uses a feature of Netfilter
+referred to as FwMark ( i.e., (F)ire(w)all Mark) to implement policy based routing.
+In linux, all skb structs have a field called the `mark`, which is used at various
+points in the networking code to make decisions based on the contents of the `mark`.
+More details about the `mark` in the `Android's Strong Host Implementation` section.
+
+### Routing Rules
+
+### Routing Tables
 
 ### Multi-homed
 
@@ -60,7 +68,7 @@ Multi-homed refers to scenarios where a device has multiple NICs each connected 
 the Internet. Mobile devices are examples of multi-homed devices because they have
 multiple NICs (e.g, WiFi, mobile, SMS, etc.).
 
-# Androids Strong Host Implementation 
+# Android's Strong Host Implementation 
 
 Android implements the strong host model[2] (slide 10). Unforunately, because
 the operating system, Linux, defaults to the weak host model and because mobile
@@ -69,14 +77,40 @@ Android uses a combination of firewall (Netfilter) and kernel supported
 features to implement policy-based routing, some of which Android has
 integrated into the upstream Linux kernel.
 
-## Linux Modifications
+## Linux Kernal Support
+
+As mentioned above, the Linux Kernal's `skb` (socket buffer) has a `mark` field that 
+is used throughout the kernel to make decisions about what to do with a packet. The 
+`skb` data structure represents a packet.
+
+```c
+struct sk_buff {
+	union {
+		struct {
+			/* These two members must be first to match sk_buff_head. */
+			struct sk_buff		*next;
+			struct sk_buff		*prev;
+
+.
+.
+.
+#ifdef CONFIG\_NETWORK\_SECMARK
+	\_\_u32		secmark;
+#endif
+
+	union {
+		\_\_u32		mark;
+		\_\_u32		reserved_tailroom;
+	};
+.
+.
+.
+}
+```
 
 ## Netfilter Modifications
 
-
-
 ## Netfilter
-
 
 # References
 
