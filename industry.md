@@ -1,10 +1,14 @@
 # Industry Experience
 
-501c3: Cyber Security researcher
+## Breakpointing Bad 
+
+### Position
 
 Cofounder / Senior Researcher
 
-# RiskSense
+## RiskSense
+
+### Position
 
 Innovations Leader
 
