@@ -114,5 +114,6 @@ struct sk_buff {
 
 # References
 
-[1](https://en.wikipedia.org/wiki/Host_model)
-[2](https://netdevconf.info/1.1/proceedings/slides/colitti-kline-linux-networking-android-devices.pdf)
+[1] [Host Model](https://en.wikipedia.org/wiki/Host_model)
+
+[2] [Networking In Your Pocket](https://netdevconf.info/1.1/proceedings/slides/colitti-kline-linux-networking-android-devices.pdf)
