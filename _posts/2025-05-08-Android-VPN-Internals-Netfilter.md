@@ -7,8 +7,8 @@ In this post, I will cover how Android implements its VPN functionality at the k
 ## Host Model: Strong Host Model versus Weak Host Model
 
 In computer networking, there are two ways of modeling how a device processes
-incoming unicast (TCP|UDP)/IP packets, the so-called ``strong-host'' and
-``weak-host'' models. 
+incoming unicast (TCP|UDP)/IP packets, the so-called `strong host` and
+`weak host` models. 
 
 ### Strong Host
 
