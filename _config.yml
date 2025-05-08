@@ -27,9 +27,8 @@ navbar-links:
     - Russian Internet Censoship: "https://dl.acm.org/doi/pdf/10.1145/3517745.3561461"
     - Dynamic Taint Analysis: "https://par.nsf.gov/servlets/purl/10326847"
     - Network Side-channels: "https://arxiv.org/pdf/2406.06483"
-  Industry: "industry"
-  Patents:
     - Predicting Weaponization: "https://assignment.uspto.gov/patent/index.html#/patent/search/resultAbstract?id=11698977&type=patNum"
+  Industry: "industry"
   Non-profit Site: "https://breakpointingbad.com"
 
 ################
