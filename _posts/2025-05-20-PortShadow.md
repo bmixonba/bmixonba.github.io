@@ -9,8 +9,8 @@ Read our [PETS 2025 paper, "Attacking Connection Tracking Frameworks as used by 
 
 # Disclosure
 
-1. https://www.openwall.com/lists/oss-security/2021/09/08/3
-2. https://seclists.org/oss-sec/2021/q3/159
+1. [https://www.openwall.com/lists/oss-security/2021/09/08/3](https://www.openwall.com/lists/oss-security/2021/09/08/3)
+2. [https://seclists.org/oss-sec/2021/q3/159](https://seclists.org/oss-sec/2021/q3/159)
 
 # Media
 
