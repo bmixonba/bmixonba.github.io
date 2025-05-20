@@ -66,7 +66,7 @@ More details about the `mark` in the `Android's Strong Host Implementation` sect
 
 Multi-homed refers to scenarios where a device has multiple NICs each connected to
 the Internet. Mobile devices are examples of multi-homed devices because they have
-multiple NICs (e.g, WiFi, mobile, SMS, etc.).
+multiple NICs (e.g, WiFi, mobile data/SMS, VoLTE, etc.).
 
 # Android's Strong Host Implementation 
 
