@@ -8,6 +8,184 @@ and advanced or policy-based routing.
 
 For details about how the socket is initially created, read my post, [Sockets in the Linux Kernel]()
 
+## Net Stack Initialization
+
+When Linux is booted, is Networking subsystem registers all of the supported protocols. For 
+the TCP/IP and UDP/IP stacks, this happens in [`af_inet`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L1890).
+
+
+
+```c
+
+static int __init inet_init(void)
+{
+.
+	rc = proto_register(&tcp_prot, 1);
+	if (rc)
+		goto out;
+.
+
+	/*
+	 *	Tell SOCKET that we are alive...
+	 */
+
+	(void)sock_register(&inet_family_ops);
+.
+	net_hotdata.tcp_protocol = (struct net_protocol) {
+		.handler	=	tcp_v4_rcv,
+		.err_handler	=	tcp_v4_err,
+		.no_policy	=	1,
+		.icmp_strict_tag_validation = 1,
+	};
+	if (inet_add_protocol(&net_hotdata.tcp_protocol, IPPROTO_TCP) < 0)
+.
+	ip_init();
+.
+	tcp_init();
+	ip_tunnel_core_init();
+
+
+}
+```
+Figure. Network stack initialization in [`af_inet`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L1890).
+
+## Packet received
+
+When a packet is received, the `ip_rcv` function registered with the network stack is called.
+
+
+
+
+```c
+
+/*
+ * IP receive entry point
+ */
+int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt,
+	   struct net_device *orig_dev)
+{
+	struct net *net = dev_net(dev);
+
+	skb = ip_rcv_core(skb, net);
+	if (skb == NULL)
+		return NET_RX_DROP;
+
+	return NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,
+		       net, NULL, skb, dev, NULL,
+		       ip_rcv_finish);
+}
+```
+Figure. The receive routine registered with the kernel, at `net/ip_input.c`(https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#558)
+
+
+```c
+
+
+/*
+ * 	Main IP Receive routine.
+ */
+static struct sk_buff *ip_rcv_core(struct sk_buff *skb, struct net *net)
+{
+```
+Figure. The main IP receive routine in Linux in `net/ip_input.c`(https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L454)
+
+
+```c
+static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	struct net_device *dev = skb->dev;
+	int ret;
+.
+	ret = ip_rcv_finish_core(net, skb, dev, NULL);
+.
+```
+Figure X. The finishing function called with Netfilter hook code, at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L433).
+
+The function `ip_rcv_finish_core` is ultimately responsible for determining the route the packet is supposed to take.
+
+```c
+static int ip_rcv_finish_core(struct net *net,
+			      struct sk_buff *skb, struct net_device *dev,
+			      const struct sk_buff *hint)
+{
+.
+	rt = skb_rtable(skb);
+.
+
+```
+Finish X.  
+
+The packet is then delivered to the upper layer protocol (TCP or UDP).
+
+
+```c
+static inline int dst_input(struct sk_buff *skb)
+{
+	return INDIRECT_CALL_INET(skb_dst(skb)->input,
+				  ip6_input, ip_local_deliver, skb);
+}
+```
+Figre X. [net/dst.h](https://github.com/torvalds/linux/blob/master/include/net/dst.h#L467)
+
+
+```c
+INDIRECT_CALLABLE_DECLARE(int udp_rcv(struct sk_buff *));
+INDIRECT_CALLABLE_DECLARE(int tcp_v4_rcv(struct sk_buff *));
+void ip_protocol_deliver_rcu(struct net *net, struct sk_buff *skb, int protocol)
+{
+	const struct net_protocol *ipprot;
+	int raw, ret;
+
+resubmit:
+	raw = raw_local_deliver(skb, protocol);
+
+	ipprot = rcu_dereference(inet_protos[protocol]);
+	if (ipprot) {
+		if (!ipprot->no_policy) {
+			if (!xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb)) {
+				kfree_skb_reason(skb,
+						 SKB_DROP_REASON_XFRM_POLICY);
+				return;
+			}
+			nf_reset_ct(skb);
+		}
+		ret = INDIRECT_CALL_2(ipprot->handler, tcp_v4_rcv, udp_rcv,
+				      skb);
+		if (ret < 0) {
+			protocol = -ret;
+			goto resubmit;
+		}
+		__IP_INC_STATS(net, IPSTATS_MIB_INDELIVERS);
+	} else {
+		if (!raw) {
+			if (xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb)) {
+				__IP_INC_STATS(net, IPSTATS_MIB_INUNKNOWNPROTOS);
+				icmp_send(skb, ICMP_DEST_UNREACH,
+					  ICMP_PROT_UNREACH, 0);
+			}
+			kfree_skb_reason(skb, SKB_DROP_REASON_IP_NOPROTO);
+		} else {
+			__IP_INC_STATS(net, IPSTATS_MIB_INDELIVERS);
+			consume_skb(skb);
+		}
+	}
+}
+
+static int ip_local_deliver_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	skb_clear_delivery_time(skb);
+	__skb_pull(skb, skb_network_header_len(skb));
+
+	rcu_read_lock();
+	ip_protocol_deliver_rcu(net, skb, ip_hdr(skb)->protocol);
+	rcu_read_unlock();
+
+	return 0;
+}
+```
+Figure X. IP code that calls to TCP or UDP receive routines, or sends an ICMP message in [ip_input](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L317).
+
+
 ## Routing Tables
 
 Linux is capable of having multiple routing tables. Each table has one or more
@@ -109,9 +287,6 @@ listen
 accept
 ```
 
-
-
-
 The socket system call creates a socket and returns a file descriptor. 
 
 Socket
@@ -119,114 +294,6 @@ Socket
  949     if (mark && setsockopt(sd, SOL_SOCKET, SO_MARK, (void *) &mark, sizeof(mark)) != 0)
 ```
 
-
-
-### Accept
-
-```c
-int inet_accept(struct socket *sock, struct socket *newsock,
-		struct proto_accept_arg *arg)
-{
-	struct sock *sk1 = sock->sk, *sk2;
-
-	/* IPV6_ADDRFORM can change sk->sk_prot under us. */
-	arg->err = -EINVAL;
-	sk2 = READ_ONCE(sk1->sk_prot)->accept(sk1, arg);
-	if (!sk2)
-		return arg->err;
-
-	lock_sock(sk2);
-	__inet_accept(sock, newsock, sk2);
-	release_sock(sk2);
-	return 0;
-}
-
-```
-Figure X. `accept` for `AF_INET` is implemented in `inet_accept`.
-
-
-For TCP, the `accept` callback is registered to `inet_csk_accept` in [`net/tcp_ipv4.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_ipv4.c)
-
-```c
-struct proto tcp_prot = {
-	.name			= "TCP",
-	.owner			= THIS_MODULE,
-	.close			= tcp_close,
-	.pre_connect		= tcp_v4_pre_connect,
-	.connect		= tcp_v4_connect,
-	.disconnect		= tcp_disconnect,
-	.accept			= inet_csk_accept,
-
-```
-Figure X. TCP implementation of `accept` system call.
-
-TCPs accept call ultimately generates a new socket.
-
-```c
-
-
-/*
- * Wait for an incoming connection, avoid race conditions. This must be called
- * with the socket locked.
- */
-static int inet_csk_wait_for_connect(struct sock *sk, long timeo)
-{
-
-}
-
-
-/*
- * This will accept the next outstanding connection.
- */
-struct sock *inet_csk_accept(struct sock *sk, struct proto_accept_arg *arg)
-{
-
-	/* Find already established connection */
-	if (reqsk_queue_empty(queue)) {
-		long timeo = sock_rcvtimeo(sk, arg->flags & O_NONBLOCK);
-
-		error = inet_csk_wait_for_connect(sk, timeo);
-```
-
-
-
-
-
-
-
-### Listen
-
-The listen system call is implemented using the following kernel datastructures and functions. 
-
-```c
-
-const struct proto_ops inet_stream_ops = {
-	.family		   = PF_INET,
-	.owner		   = THIS_MODULE,
-
-	.listen		   = inet_listen,
-	.setsockopt	   = sock_common_setsockopt,
-	.getsockopt	   = sock_common_getsockopt,
-	.sendmsg	   = inet_sendmsg,
-	.recvmsg	   = inet_recvmsg,
-```
-Figure X. Data stuctures for `PROTO_STREAM`/TCP sockets as defined in [`net/af_inet.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L1052)
-
-
-```c
-/*
- *	Move a socket into listening state.
- */
-int inet_listen(struct socket *sock, int backlog)
-{
-
-```
-Figure `listen` for `AF_NET` is implemented in [`af_inet.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L252)
-
-
-The `inet_connection_sock_af_ops` struct `ipv4_specific` contains callback functions for 
-processing received tcp packets. The `conn\_request` member is eventually called be the
-Linux `socket` is in the `LISTEN` state, per the comments.
 
 
 The input function will eventually call the `ip_route_output_slow` function to send the response
@@ -406,6 +473,33 @@ int __xfrm_policy_check(struct sock *sk, int dir, struct sk_buff *skb,
 Figure `__xfrm_policy_check` in [3673](https://github.com/torvalds/linux/blob/master/net/xfrm/xfrm_policy.c#L3673)
 
 #### Routing Incoming packets
+
+When a client or server calls `recv` on a `socket`, fd, that code
+eventually calls to the IP code. This code is called by 
+
+
+```c
+
+int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt,
+	   struct net_device *orig_dev)
+
+
+
+/*
+ * 	Main IP Receive routine.
+ */
+static struct sk_buff *ip_rcv_core(struct sk_buff *skb, struct net *net)
+{
+	const struct iphdr *iph;
+
+
+struct rtable *rt_dst_alloc(struct net_device *dev,
+			    unsigned int flags, u16 type,
+			    bool noxfrm)
+
+			rt->dst.input = ip_local_deliver;
+
+```
 
 ```c
 

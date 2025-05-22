@@ -73,8 +73,7 @@ static int inet_create(struct net *net, struct socket *sock, int protocol,
 ```
 Figure. Socket creation in [`net/af_net.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L252)
 
-After the socket is created, we can either `listen` and `accept` if we are developing a server or `connect if we 
-are developing a client program.
+After the socket is created, we can either `listen` and `accept` if we are developing a server or `connect if we  are developing a client program.
 
 ### Listen
 
