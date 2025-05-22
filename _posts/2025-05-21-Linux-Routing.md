@@ -6,7 +6,7 @@ and advanced or policy-based routing.
 
 # Background
 
-For details about how the socket is initially created, read my post, [Sockets in the Linux Kernel]()
+For details about how the socket is initially created, read my post, [Sockets in the Linux Kernel](https://bmixonba.github.io/2025-05-22-Sockets-in-the-Linux-Kernel/)
 
 ## Net Stack Initialization
 
