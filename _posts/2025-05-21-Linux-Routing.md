@@ -7,6 +7,65 @@ and advanced or policy-based routing.
 
 # Background
 
+## Sockets
+
+The first thing you do when writing any network code is open a `socket`. A socket is a special type 
+of file in Linux. Socket creation is handled the `socket` system call. The code for this
+lives in [net/socket.c](https://github.com/torvalds/linux/blob/master/net/socket.c#L1621). When 
+setting up a socket from user space, you generally specific the type of socket, e.g., `AF_INET`,
+and the type, such as `SOCK_STREAM` for TCP or `SOCK_DGRAM` for UDP.
+
+
+```c
+/**
+ *	__sock_create - creates a socket
+ *	@net: net namespace
+ *	@family: protocol family (AF_INET, ...)
+ *	@type: communication type (SOCK_STREAM, ...)
+ *	@protocol: protocol (0, ...)
+ *	@res: new socket
+ *	@kern: boolean for kernel space sockets
+ *
+ *	Creates a new socket and assigns it to @res, passing through LSM.
+ *	Returns 0 or an error. On failure @res is set to %NULL. @kern must
+ *	be set to true if the socket resides in kernel space.
+ *	This function internally uses GFP_KERNEL.
+ */
+
+int __sock_create(struct net *net, int family, int type, int protocol,
+			 struct socket **res, int kern)
+{
+
+.
+
+	err = pf->create(net, sock, protocol, kern); // Line 1541
+.
+
+```
+
+The underlying semantics of the `family` and `type` are the same between the user-space function
+call and the low-level call above. The underlying `create` function is configured by the
+protocol family (PF), which, for this example is `AF_NET`. This is defined in a struct in `net/af_inet.c`,
+specifically, `inet_create`.
+
+```c
+static int inet_create(struct net *net, struct socket *sock, int protocol,
+		       int kern)
+{
+
+
+
+	if (!kern) {
+		err = BPF_CGROUP_RUN_PROG_INET_SOCK(sk);
+		if (err)
+			goto out_sk_release;
+	}
+
+```
+Figure. Socket creation in [`net/af_net.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L252)
+
+
+I am currently not sure how the `create` set 
 
 ## Routing Tables
 
@@ -52,6 +111,7 @@ enum rt_class_t {
 
 ```
 Figure X. [Identifiers for routing tables.](https://elixir.bootlin.com/linux/v6.14.4/source/include/uapi/linux/rtnetlink.h#L355)
+
 
 # Lifetime of a packet
 
@@ -123,9 +183,42 @@ Accept
 ### Listen
 
 The listen system call is implemented using the following kernel datastructures and functions. 
+
+```c
+
+const struct proto_ops inet_stream_ops = {
+	.family		   = PF_INET,
+	.owner		   = THIS_MODULE,
+
+	.listen		   = inet_listen,
+	.setsockopt	   = sock_common_setsockopt,
+	.getsockopt	   = sock_common_getsockopt,
+	.sendmsg	   = inet_sendmsg,
+	.recvmsg	   = inet_recvmsg,
+```
+Figure X. Data stuctures for `PROTO_STREAM`/TCP sockets as defined in [`net/af_inet.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L1052)
+
+
+```c
+/*
+ *	Move a socket into listening state.
+ */
+int inet_listen(struct socket *sock, int backlog)
+{
+
+```
+Figure `listen` for `AF_NET` is implemented in [`af_inet.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L252)
+
+
 The inet\_connection\_sock\_af\_ops struct ipv4_specific contains callback functions for 
 processing received tcp packets. The `conn\_request` member is eventually called be the
 Linux `socket` is in the `LISTEN` state, per the comments.
+
+
+The input function will eventually call the `ip_route_output_slow` function to send the response
+out the proper device.
+
+##### Routing outgoing packets.
 
 ```c
 
@@ -283,6 +376,108 @@ static inline int fib_lookup(struct net *net, struct flowi4 *flp,
 Figure X. FIB look up in [`ip_fib.c`](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L374)
 
 
+```c
+
+
+#### IPsec support in Linux 
+
+XFRM is used to support IPsec in the Linux kernel [link](https://docs.cilium.io/en/latest/reference-guides/xfrm/index.html)
+int __xfrm_policy_check(struct sock *sk, int dir, struct sk_buff *skb,
+			unsigned short family)
+{
+
+	nf_nat_decode_session(skb, &fl, family);
+
+```
+Figure `__xfrm_policy_check` in [3673](https://github.com/torvalds/linux/blob/master/net/xfrm/xfrm_policy.c#L3673)
+
+#### Routing Incoming packets
+
+```c
+
+static enum skb_drop_reason
+ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
+		    dscp_t dscp, struct net_device *dev,
+		    struct fib_result *res)
+{
+// Get rid of invalid addresses first
+
+
+	/*
+	 *	Now we are ready to route packet.
+	 */
+//
+	fl4.flowi4_mark = skb->mark;
+
+	fl4.flowi4_uid = sock_net_uid(net, NULL);
+//
+	err = fib_lookup(net, &fl4, res, 0);
+	if (err != 0) {
+		if (!IN_DEV_FORWARD(in_dev))
+	err = fib_lookup(net, &fl4, res, 0);
+
+```
+Figure `ip_route_input_slow` in [route.c](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2908)
+
+The call to `fib_lookup` finds the correct route for the incoming packet. `fib_lookup` has two definitions, one for
+when the kernel supports only one routing table, and one for when multiple tables are available.
+
+```c
+
+static inline int fib_lookup(struct net *net, struct flowi4 *flp,
+			     struct fib_result *res, unsigned int flags)
+{
+
+	flags |= FIB_LOOKUP_NOREF;
+	if (net->ipv4.fib_has_custom_rules)
+		return __fib_lookup(net, flp, res, flags);
+
+
+```
+Figure X. `fig_lookup` for multiple tables [374](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L374).
+```c
+
+When mutliple tables are defined, the routing code calls into `__fib_lookup` in [`fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108).
+
+int __fib_lookup(struct net *net, struct flowi4 *flp,
+		 struct fib_result *res, unsigned int flags)
+{
+.
+	err = fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg);
+
+}
+.
+
+static int fib_rule_match(struct fib_rule *rule, struct fib_rules_ops *ops,
+			  struct flowi *fl, int flags,
+			  struct fib_lookup_arg *arg)
+{
+	int iifindex, oifindex, ret = 0;
+
+	if ((rule->mark ^ fl->flowi_mark) & rule->mark_mask)
+		goto out;
+
+	if (rule->tun_id && (rule->tun_id != fl->flowi_tun_key.tun_id))
+		goto out;
+
+	if (rule->l3mdev && !l3mdev_fib_rule_match(rule->fr_net, fl, arg))
+		goto out;
+
+	if (uid_lt(fl->flowi_uid, rule->uid_range.start) ||
+	    uid_gt(fl->flowi_uid, rule->uid_range.end))
+		goto out;
+
+
+
+.
+
+int fib_rules_lookup(struct fib_rules_ops *ops, struct flowi *fl,
+		     int flags, struct fib_lookup_arg *arg)
+{
+
+
+```
+Figure X. in `fig_rules.c` Line [108](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108)
 
 
 ## Client: Local to Remote 
