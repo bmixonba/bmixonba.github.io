@@ -102,6 +102,7 @@ static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 Figure X. The finishing function called with Netfilter hook code, at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L433).
 
 ![Netfilter calling points for different tables and default chains.](./imgs/Netfilter-packet-flow.svg)
+(Original source at [Wikipedia](https://upload.wikimedia.org/wikipedia/commons/3/37/Netfilter-packet-flow.svg))
 
 kk
 The function `ip_rcv_finish_core` is ultimately responsible for determining the route the packet is supposed to take.
