@@ -75,7 +75,7 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt,
 		       ip_rcv_finish);
 }
 ```
-Figure. The receive routine registered with the kernel, at `net/ip_input.c`(https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#558)
+Figure X. The receive routine registered with the kernel, at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#558)
 
 
 ```c
