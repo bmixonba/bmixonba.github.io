@@ -4,11 +4,9 @@ This post covers the technical details of packet routing in Linux. Linux
 has mechanisms in place to route packets using basic, "destination" based routing,
 and advanced or policy-based routing. 
 
-
 # Background
 
 For details about how the socket is initially created, read my post, [Sockets in the Linux Kernel]()
-
 
 ## Routing Tables
 
