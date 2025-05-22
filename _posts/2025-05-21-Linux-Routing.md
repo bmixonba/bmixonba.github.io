@@ -68,11 +68,16 @@ ShadowSocks, one of the primary functions invoked in user-space are the
 of running each of these programs as servers. was taken from OpenVPN.
 
 ```c
+1942 open_tun(const char *dev, const char *dev_type, const char *dev_node, struct tuntap *tt)
+1943 {
+.
+.
+.
+2027             if ((ctl_fd = socket(AF_INET, SOCK_DGRAM, 0)) >= 0)
 
-// TODO: Add snippet of code from OpenVPN server.
 
 ```
-Figure OpenVPN
+Figure OpenVPN. Code to create a tuntap device in OpenVPN in [openvpn/src/tun.c](https://github.com/OpenVPN/openvpn/blob/master/src/openvpn/tun.c)
 ```c
 
 // TODO: Add snippet of code from WireGuard server.
@@ -91,6 +96,194 @@ Figure IPsec
 
 ```
 Figure ShadowSocks
+
+The basic patterns is 
+
+
+```c
+sock = socket()
+// bind optional. Cant do this in Android because of multiple concurrent networks
+getopt()
+listen
+accept
+```
+
+
+The socket system call creates a socket and returns a file descriptor. 
+
+Socket
+```c
+ 949     if (mark && setsockopt(sd, SOL_SOCKET, SO_MARK, (void *) &mark, sizeof(mark)) != 0)
+```
+
+
+
+Accept
+
+### Listen
+
+The listen system call is implemented using the following kernel datastructures and functions. 
+The inet\_connection\_sock\_af\_ops struct ipv4_specific contains callback functions for 
+processing received tcp packets. The `conn\_request` member is eventually called be the
+Linux `socket` is in the `LISTEN` state, per the comments.
+
+```c
+
+const struct inet_connection_sock_af_ops ipv4_specific = {
+	.queue_xmit	   = ip_queue_xmit,
+	.send_check	   = tcp_v4_send_check,
+	.rebuild_header	   = inet_sk_rebuild_header,
+	.sk_rx_dst_set	   = inet_sk_rx_dst_set,
+	.conn_request	   = tcp_v4_conn_request,
+	.syn_recv_sock	   = tcp_v4_syn_recv_sock,
+	.net_header_len	   = sizeof(struct iphdr),
+	.setsockopt	   = ip_setsockopt,
+	.getsockopt	   = ip_getsockopt,
+	.mtu_reduced	   = tcp_v4_mtu_reduced,
+};
+EXPORT_IPV6_MOD(ipv4_specific);
+.
+.
+.
+/*
+ *	This function implements the receiving procedure of RFC 793 for
+ *	all states except ESTABLISHED and TIME_WAIT.
+ *	It's called from both tcp_v4_rcv and tcp_v6_rcv and should be
+ *	address independent.
+ */
+tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct inet_connection_sock *icsk = inet_csk(sk);
+	const struct tcphdr *th = tcp_hdr(skb);
+.
+	case TCP_LISTEN:
+.
+		if (th->syn) {
+			if (th->fin) {
+				SKB_DR_SET(reason, TCP_FLAGS);
+				goto discard;
+			}
+			icsk->icsk_af_ops->conn_request(sk, skb);
+.
+}
+```
+Figure: Main TCP receive function in the Linux kernel at line [6804](https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L6804).
+
+```c
+int tcp_conn_request(struct request_sock_ops *rsk_ops,
+		     const struct tcp_request_sock_ops *af_ops,
+		     struct sock *sk, struct sk_buff *skb)
+.
+	tcp_openreq_init(req, &tmp_opt, skb, sk);
+.
+```
+Figure tcp\_conn\_request in [tcp\_ip.c](https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7224)
+
+```c
+
+static void tcp_openreq_init(struct request_sock *req,
+			     const struct tcp_options_received *rx_opt,
+			     struct sk_buff *skb, const struct sock *sk)
+.
+	ireq->ir_mark = inet_request_mark(sk, skb);
+.
+```
+Figure in tcp\_openreq\_init [tcp\_ip.c](https://github.com/torvalds/linux/blob/master/net/ipv4/tcp_input.c#L7096)
+
+```c
+static inline u32 inet_request_mark(const struct sock *sk, struct sk_buff *skb)
+{
+	u32 mark = READ_ONCE(sk->sk_mark);
+
+	if (!mark && READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_fwmark_accept))
+		return skb->mark;
+
+	return mark;
+}
+```
+Figure inet\_request\_mark in [inet\_sock.h](https://github.com/torvalds/linux/blob/master/include/net/inet_sock.h#L109)
+
+
+```c
+struct dst_entry *inet_csk_route_req(const struct sock *sk,
+				     struct flowi4 *fl4,
+				     const struct request_sock *req)
+.
+
+	flowi4_init_output(fl4, ireq->ir_iif, ireq->ir_mark,
+.
+.
+			   htons(ireq->ir_num), sk->sk_uid);
+
+	security_req_classify_flow(req, flowi4_to_flowi_common(fl4));
+	rt = ip_route_output_flow(net, fl4, sk);
+.
+	return &rt->dst;
+}
+
+```
+
+The `inet_csk_route_req` routine is responsible for routing the packet to the
+proper destination. First it builds a flow label4, `fl4`, to look up the route
+for the network associated with the socket. The flow label includes the
+socket's `mark` which is used for policy-based routing. After initializing 
+the flow label with a call to `flowi4\_init\_output`, it performs a security
+check to classified the flow label for the socket, and then looks up the
+route by invoking `ip_route_output_flow`.
+```c
+
+struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
+				    const struct sock *sk)
+{
+	struct rtable *rt = __ip_route_output_key(net, flp4);
+```
+Figure X. In []()
+
+```c
+static inline struct rtable *__ip_route_output_key(struct net *net,
+						   struct flowi4 *flp)
+{
+	return ip_route_output_key_hash(net, flp, NULL);
+}
+```
+Figure X. in [route.h](https://github.com/torvalds/linux/blob/master/include/net/route.h#L166).
+
+```c
+struct rtable *ip_route_output_key_hash(struct net *net, struct flowi4 *fl4,
+					const struct sk_buff *skb)
+{
+.
+	rth = ip_route_output_key_hash_rcu(net, fl4, &res, skb);
+.
+}
+
+
+struct rtable *ip_route_output_key_hash_rcu(struct net *net, struct flowi4 *fl4,
+					    struct fib_result *res,
+					    const struct sk_buff *skb)
+{
+.
+	err = fib_lookup(net, fl4, res, 0);
+
+
+.
+```
+Figure X. Main route table lookup routine in [route.c](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2688)
+
+
+```c
+
+static inline int fib_lookup(struct net *net, struct flowi4 *flp,
+			     struct fib_result *res, unsigned int flags)
+.
+
+.
+```
+Figure X. FIB look up in [`ip_fib.c`](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L374)
+
+
+
 
 ## Client: Local to Remote 
 
