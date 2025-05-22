@@ -49,12 +49,9 @@ static int __init inet_init(void)
 ```
 Figure. Network stack initialization in [`af_inet`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L1890).
 
-## Packet received
+# Packet Reception 
 
 When a packet is received, the `ip_rcv` function registered with the network stack is called.
-
-
-
 
 ```c
 
@@ -87,7 +84,7 @@ Figure X. The receive routine registered with the kernel, at [`net/ip_input.c`](
 static struct sk_buff *ip_rcv_core(struct sk_buff *skb, struct net *net)
 {
 ```
-Figure. The main IP receive routine in Linux in `net/ip_input.c`(https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L454)
+Figure X. The main IP receive routine in Linux in `net/ip_input.c`(https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L454)
 
 
 ```c
@@ -104,7 +101,6 @@ Figure X. The finishing function called with Netfilter hook code, at [`net/ip_in
 ![Netfilter calling points for different tables and default chains.](./imgs/Netfilter-packet-flow.png)
 (Original source at [Wikipedia](https://upload.wikimedia.org/wikipedia/commons/3/37/Netfilter-packet-flow.svg))
 
-kk
 The function `ip_rcv_finish_core` is ultimately responsible for determining the route the packet is supposed to take.
 
 ```c
@@ -115,12 +111,10 @@ static int ip_rcv_finish_core(struct net *net,
 .
 	rt = skb_rtable(skb);
 .
-
 ```
-Finish X.  
+Finish X. Core function for recieving a TCP or UDP packet.
 
 The packet is then delivered to the upper layer protocol (TCP or UDP).
-
 
 ```c
 static inline int dst_input(struct sk_buff *skb)
@@ -547,10 +541,12 @@ static inline int fib_lookup(struct net *net, struct flowi4 *flp,
 
 ```
 Figure X. `fig_lookup` for multiple tables [374](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L374).
+
+
+When mutliple tables are defined, the routing code calls into `__fib_lookup` in
+[`fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108).
+
 ```c
-
-When mutliple tables are defined, the routing code calls into `__fib_lookup` in [`fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108).
-
 int __fib_lookup(struct net *net, struct flowi4 *flp,
 		 struct fib_result *res, unsigned int flags)
 {
