@@ -134,7 +134,6 @@ Figure. Network stack initialization in [`af_inet`](https://github.com/torvalds/
 
 # Packet Reception 
 
-When a packet is received, the `ip_rcv` function registered with the network stack is called.
 
 ## Link Layer
 
@@ -334,8 +333,84 @@ void netif_receive_skb_list_internal(struct list_head *head)
 	rcu_read_unlock();
 }
 ```
-Figure. 
+Figure. Device receive function interface. This function recieves a list of `skb`s from GRO
+and passes them up the network stack.
 
+```c
+static void __netif_receive_skb_list(struct list_head *head)
+{
+	unsigned long noreclaim_flag = 0;
+	struct sk_buff *skb, *next;
+	bool pfmemalloc = false; /* Is current sublist PF_MEMALLOC? */
+.
+
+	list_for_each_entry_safe(skb, next, head, list) {
+		if ((sk_memalloc_socks() && skb_pfmemalloc(skb)) != pfmemalloc) {
+.
+			if (!list_empty(&sublist))
+				__netif_receive_skb_list_core(&sublist, pfmemalloc);
+.
+```
+Figure X. More indirection to get to Network stack. Mostly book keeping for memory
+and to process the list of GRO packets. Located in [`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L6005).
+
+```c
+static void __netif_receive_skb_list_core(struct list_head *head, bool pfmemalloc)
+{
+.
+.
+	list_for_each_entry_safe(skb, next, head, list) {
+		struct net_device *orig_dev = skb->dev;
+.
+		__netif_receive_skb_core(&skb, pfmemalloc, &pt_prev);
+.
+	/* dispatch final sublist */
+	__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr);
+
+.
+.
+}
+```
+Figure X. Located in [`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L5939)
+
+
+```c
+static inline void __netif_receive_skb_list_ptype(struct list_head *head,
+						  struct packet_type *pt_prev,
+						  struct net_device *orig_dev)
+{
+	struct sk_buff *skb, *next;
+
+	if (!pt_prev)
+		return;
+	if (list_empty(head))
+		return;
+	if (pt_prev->list_func != NULL)
+		INDIRECT_CALL_INET(pt_prev->list_func, ipv6_list_rcv,
+				   ip_list_rcv, head, pt_prev, orig_dev);
+	else
+		list_for_each_entry_safe(skb, next, head, list) {
+			skb_list_del_init(skb);
+			pt_prev->func(skb, skb->dev, pt_prev, orig_dev);
+		}
+}
+```
+Figure X. Located at [`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L5919) 
+
+At last, we have reach the final layer of indirection between the generic
+packet reception code and the IP stack. In if clause, the `INDIRECT_CALL_INET`
+is a macro that calls either
+[`ipv6_list_rcv`](https://github.com/torvalds/linux/blob/master/net/ipv6/ip6_input.c#L323)
+for IPv6 or
+[`ip_list_rcv`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L639)
+for IPv4. This clause is executed when the network layer (e.g., IPv4 or v6)
+registered a processing function for lists of packets (e.g., fragments).
+Otherwise, `pt_prev->func` is going to be either
+[`ip_rcv`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L558)
+or
+[`ipv6_rcv`](https://github.com/torvalds/linux/blob/master/net/ipv6/ip6_input.c#L302).
+
+In the `Network Layer` section, I cover how the packet is delivered to the `af_inet` module.
 
 
 ### Tun device
@@ -392,6 +467,8 @@ Figure. Main receive function for tunnel device. Defined in [`driver/net/tun.c`]
 
 
 ## Network Layer
+
+After the packets have been aggregated, the `ip_rcv` function is called.
 
 ```c
 
