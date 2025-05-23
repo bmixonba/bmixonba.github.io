@@ -88,7 +88,14 @@ When Linux is booted, its Networking subsystem registers all of the supported pr
 the TCP/IP and UDP/IP stacks, the `inet_init` function in [`af_inet`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L1890) is responsible for this.
 
 ```c
-
+.
+static struct packet_type ip_packet_type __read_mostly = {
+	.type = cpu_to_be16(ETH_P_IP),
+	.func = ip_rcv,
+	.list_func = ip_list_rcv,
+};
+.
+.
 static int __init inet_init(void)
 {
 .
@@ -115,6 +122,10 @@ static int __init inet_init(void)
 .
 	tcp_init();
 	ip_tunnel_core_init();
+.
+.
+	dev_add_pack(&ip_packet_type);
+.
 
 
 }
@@ -239,7 +250,7 @@ gro_result_t gro_receive_skb(struct gro_node *gro, struct sk_buff *skb)
 }
 ```
 Figure X. GRO receive function calls `dev_gro_receive` to pass the `skb` up the network
-stack. More details can be found at [`net/core/gro.c`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L622).
+stack for packet aggregation. More details can be found at [`net/core/gro.c`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L622).
 
 
 
@@ -260,6 +271,72 @@ static enum gro_result dev_gro_receive(struct gro_node *gro,
 ```
 Figure. GRO calling the `af_inet` packet reception code `inet_gro_receive` for IPv4 or `ipv6_gro_receive` for IPv6. 
 More details at [`net/core/gro.c#L460`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L460).
+
+The `gro_*` functions for IP and TCP/UDP are used to aggregate fragmented (and segmented?) packets, but do not
+make any routing decisions.
+
+
+Once the packet streams have been collated, `gro_receive_skb` calls `gro_receive_finish`.
+
+```c
+static gro_result_t gro_skb_finish(struct gro_node *gro, struct sk_buff *skb,
+				   gro_result_t ret)
+{
+	switch (ret) {
+	case GRO_NORMAL:
+		gro_normal_one(gro, skb, 1);
+		break;
+```
+Figure. `gro_skb_finish` is called once GRO has aggregated a stream of packets. Details at [`net/core/gro.c`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L596).
+
+```c
+/* Queue one GRO_NORMAL SKB up for list processing. If batch size exceeded,
+ * pass the whole batch up to the stack.
+ */
+static inline void gro_normal_one(struct gro_node *gro, struct sk_buff *skb,
+				  int segs)
+{
+	list_add_tail(&skb->list, &gro->rx_list);
+	gro->rx_count += segs;
+	if (gro->rx_count >= READ_ONCE(net_hotdata.gro_normal_batch))
+		gro_normal_list(gro);
+}
+```
+Figure. `gro_normal_one` is used to pass the aggregated packets up the stack. Details at [`include/net/gro.h`](https://github.com/torvalds/linux/blob/master/include/net/gro.h#L540).
+
+More boilerplate and indirection are called, but we are finally getting to something that resembles `ip_rcv`.
+
+```c
+/* Pass the currently batched GRO_NORMAL SKBs up to the stack. */
+static inline void gro_normal_list(struct gro_node *gro)
+{
+	if (!gro->rx_count)
+		return;
+	netif_receive_skb_list_internal(&gro->rx_list);
+	INIT_LIST_HEAD(&gro->rx_list);
+	gro->rx_count = 0;
+}
+
+```
+
+The function `netif_receive_skb_list_internal` while boiler plate, is at least out of the GRO could
+and closer to an IP receive routine, which is what we need for packet routing.
+
+
+```c
+void netif_receive_skb_list_internal(struct list_head *head)
+{
+	struct sk_buff *skb, *next;
+.
+.
+
+	__netif_receive_skb_list(head);
+	rcu_read_unlock();
+}
+```
+Figure. 
+
+
 
 ### Tun device
 
