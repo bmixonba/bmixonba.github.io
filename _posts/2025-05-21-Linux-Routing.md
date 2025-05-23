@@ -171,7 +171,11 @@ static int emac_napi_rtx(struct napi_struct *napi, int budget)
 ```
 Figure X. Packet reception code `emac_napi_rtx` in [`drivers/net/qualcomm/emac/emac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac.c#L96).
 
-This is just a wrapper for `emac_mac_rx_process`, which does the actual packet processes and calls, e.g., the `af_inet` (TCP/IP) stack.
+This is just a wrapper for `emac_mac_rx_process`, which does the actual packet
+processes and calls, e.g., the `af_inet` (TCP/IP) stack.  Before this happens a
+lot of sanity checks are performed. For the Qualcomm driver, the generic
+receiption offloading (GRO) framework ised used instead of calling the `ip_rcv`
+routine directly every time an interupt from the network card is raised.
 
 ```c
 /* Process receive event */
