@@ -50,6 +50,7 @@ The `emac_probe` function sets up `napi` functions to be called whenever the dev
 packet. NAPI (or "new-API") is the updated framework the Linux kernel uses to send and receive
 packets on network interfaces. It uses polling to periodically check the send and receive buffers
 and processes groups of packets at once instead of using interupts, which are less efficient.
+The function that will actually handle packet reception is `emac_napi_rtx`.
 
 ```c
 static int emac_probe(struct platform_device *pdev)
@@ -155,6 +156,63 @@ static int emac_napi_rtx(struct napi_struct *napi, int budget)
 
 ```
 Figure X. Packet reception code `emac_napi_rtx` in [`drivers/net/qualcomm/emac/emac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac.c#L96).
+
+This is just a wrapper for `emac_mac_rx_process`, which does the actual packet processes and calls, e.g., the `af_inet` (TCP/IP) stack.
+
+```c
+/* Process receive event */
+void emac_mac_rx_process(struct emac_adapter *adpt, struct emac_rx_queue *rx_q,
+			 int *num_pkts, int max_pkts)
+{
+.
+.
+	do {
+.
+		if (likely(RRD_NOR(&rrd) == 1)) {
+			/* good receive */
+			rfbuf = GET_RFD_BUFFER(rx_q, RRD_SI(&rrd));
+			dma_unmap_single(adpt->netdev->dev.parent,
+					 rfbuf->dma_addr, rfbuf->length,
+					 DMA_FROM_DEVICE);
+			rfbuf->dma_addr = 0;
+			skb = rfbuf->skb;
+.
+		skb_put(skb, RRD_PKT_SIZE(&rrd) - ETH_FCS_LEN);
+		skb->dev = netdev;
+		skb->protocol = eth_type_trans(skb, skb->dev);
+.
+		emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),
+				 (bool)RRD_CVTAG(&rrd));
+		(*num_pkts)++;
+	} while (*num_pkts < max_pkts);
+.
+}
+```
+Figure X. Code to pull a packet from the Qualcomm `rx` queue and call, e.g., `af_inet`, in [`drivers/net/qualcomm/emac-emac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac-mac.c#L1087).
+
+
+After the driver sets up the `skb` by adding the device driver to it, it calls to `napi_gro_receive` to deliver it 
+to the upper layers.
+
+
+```c
+/* Push the received skb to upper layers */
+static void emac_receive_skb(struct emac_rx_queue *rx_q,
+			     struct sk_buff *skb,
+			     u16 vlan_tag, bool vlan_flag)
+{
+	if (vlan_flag) {
+		u16 vlan;
+
+		EMAC_TAG_TO_VLAN(vlan_tag, vlan);
+		__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021Q), vlan);
+	}
+
+	napi_gro_receive(&rx_q->napi, skb);
+}
+```
+Figure X. Qualcomm card delivering `skb` to upper layers _via_ NAPI. In [`drivers/net/qualcomm/emac/emac-mac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac-mac.c#L1071)
+
 
 
 
