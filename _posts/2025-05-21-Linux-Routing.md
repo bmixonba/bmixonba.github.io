@@ -4,9 +4,14 @@ This post covers the technical details of packet routing in Linux. Linux
 has mechanisms in place to route packets using basic, "destination" based routing,
 and advanced or policy-based routing. 
 
-# Background
 
 For details about how the socket is initially created, read my post, [Sockets in the Linux Kernel](https://bmixonba.github.io/2025-05-22-Sockets-in-the-Linux-Kernel/)
+
+# Initialization 
+
+When Linux first boots, it initializes a number of critical systems. For
+networking, this includes the interfaces (e.g., network cards and mobile data
+modems), the network stack (TCP/IP), the the Netfilter framework.
 
 ## Interfaces
 
@@ -82,7 +87,7 @@ Figure X. `emac_probe` function setting up send (TX) and receive (RX) queues in 
 
 ### tun
 
-## Net Stack Initialization
+## Network Stack 
 
 When Linux is booted, its Networking subsystem registers all of the supported protocols. For 
 the TCP/IP and UDP/IP stacks, the `inet_init` function in [`af_inet`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L1890) is responsible for this. The
@@ -135,6 +140,163 @@ static int __init inet_init(void)
 }
 ```
 Figure. Network stack initialization in [`af_inet`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L1890).
+
+## Netfilter
+
+The netfilter framework registers a numbre of critical subsystems to be initialized when Linux first boots. The conntrack
+module, the SElinux policy.
+
+```c
+```
+Figure. Conntrack module registration and initailzation.
+
+SELinux is initialized early in the boot process so that it is able to properly
+label all processes and objects when they are created. Per
+
+```c
+/* SELinux requires early initialization in order to label
+   all processes and objects when they are created. */
+DEFINE_LSM(selinux) = {
+	.name = "selinux",
+	.flags = LSM_FLAG_LEGACY_MAJOR | LSM_FLAG_EXCLUSIVE,
+	.enabled = &selinux_enabled_boot,
+	.blobs = &selinux_blob_sizes,
+	.init = selinux_init,
+};
+
+#if defined(CONFIG_NETFILTER)
+static const struct nf_hook_ops selinux_nf_ops[] = {
+	{
+		.hook =		selinux_ip_postroute,
+		.pf =		NFPROTO_IPV4,
+		.hooknum =	NF_INET_POST_ROUTING,
+		.priority =	NF_IP_PRI_SELINUX_LAST,
+	},
+	{
+		.hook =		selinux_ip_forward,
+		.pf =		NFPROTO_IPV4,
+		.hooknum =	NF_INET_FORWARD,
+		.priority =	NF_IP_PRI_SELINUX_FIRST,
+	},
+	{
+		.hook =		selinux_ip_output,
+		.pf =		NFPROTO_IPV4,
+		.hooknum =	NF_INET_LOCAL_OUT,
+		.priority =	NF_IP_PRI_SELINUX_FIRST,
+	},
+#if IS_ENABLED(CONFIG_IPV6)
+	{
+		.hook =		selinux_ip_postroute,
+		.pf =		NFPROTO_IPV6,
+		.hooknum =	NF_INET_POST_ROUTING,
+		.priority =	NF_IP6_PRI_SELINUX_LAST,
+	},
+	{
+		.hook =		selinux_ip_forward,
+		.pf =		NFPROTO_IPV6,
+		.hooknum =	NF_INET_FORWARD,
+		.priority =	NF_IP6_PRI_SELINUX_FIRST,
+	},
+	{
+		.hook =		selinux_ip_output,
+		.pf =		NFPROTO_IPV6,
+		.hooknum =	NF_INET_LOCAL_OUT,
+		.priority =	NF_IP6_PRI_SELINUX_FIRST,
+	},
+#endif	/* IPV6 */
+};
+
+static int __net_init selinux_nf_register(struct net *net)
+{
+	return nf_register_net_hooks(net, selinux_nf_ops,
+				     ARRAY_SIZE(selinux_nf_ops));
+}
+```
+Figure. SELinux initialization data structure and registration with Netfitler. Located at [`security/selinux/hooks.c`](https://github.com/torvalds/linux/blob/master/security/selinux/hooks.c#L7562).
+
+SELinux registers several hooks with Netfilter. These hooks are registered with
+the `NF_INET_POSTROUTING`, `NF_INET_FORWARD`, and `NF_INET_LOCAL_OUT` hooks.
+The code that registers SELinux with the Kernel by calling `__initcall`.
+
+```c
+static int __init selinux_nf_ip_init(void)
+{
+	int err;
+
+	if (!selinux_enabled_boot)
+		return 0;
+
+	pr_debug("SELinux:  Registering netfilter hooks\n");
+
+	err = register_pernet_subsys(&selinux_net_ops);
+	if (err)
+		panic("SELinux: register_pernet_subsys: error %d\n", err);
+
+	return 0;
+}
+__initcall(selinux_nf_ip_init);
+#endif /* CONFIG_NETFILTER */
+```
+Figure. SELinux module registration and initailzation. Located at [`security/selinux/hooks.c`](https://github.com/torvalds/linux/blob/master/security/selinux/hooks.c#L7631).
+
+
+```c
+static unsigned int selinux_ip_postroute(void *priv,
+					 struct sk_buff *skb,
+					 const struct nf_hook_state *state)
+{
+.
+.
+	sk = skb_to_full_sk(skb);
+#ifdef CONFIG_XFRM
+	/* If skb->dst->xfrm is non-NULL then the packet is undergoing an IPsec
+	 * packet transformation so allow the packet to pass without any checks
+	 * since we'll have another chance to perform access control checks
+	 * when the packet is on it's final way out.
+	 * NOTE: there appear to be some IPv6 multicast cases where skb->dst
+	 *       is NULL, in this case go ahead and apply access control.
+	 * NOTE: if this is a local socket (skb->sk != NULL) that is in the
+	 *       TCP listening state we cannot wait until the XFRM processing
+	 *       is done as we will miss out on the SA label if we do;
+	 *       unfortunately, this means more work, but it is only once per
+	 *       connection. */
+	if (skb_dst(skb) != NULL && skb_dst(skb)->xfrm != NULL &&
+	    !(sk && sk_listener(sk)))
+		return NF_ACCEPT;
+#endif
+.
+.
+.
+	} else if (sk_listener(sk)) {
+		/* Locally generated packet but the associated socket is in the
+		 * listening state which means this is a SYN-ACK packet.  In
+		 * this particular case the correct security label is assigned
+		 * to the connection/request_sock but unfortunately we can't
+		 * query the request_sock as it isn't queued on the parent
+		 * socket until after the SYN-ACK packet is sent; the only
+		 * viable choice is to regenerate the label like we do in
+		 * selinux_inet_conn_request().  See also selinux_ip_output()
+		 * for similar problems. */
+		u32 skb_sid;
+		struct sk_security_struct *sksec;
+
+		sksec = selinux_sock(sk);
+		if (selinux_skb_peerlbl_sid(skb, family, &skb_sid))
+			return NF_DROP;
+.
+}
+```
+Figure. Postrouting hook for SELinux. Details at [`security/selinux/hooks.c`](https://github.com/torvalds/linux/blob/master/security/selinux/hooks.c#L5846).
+
+`OPEN QUESTIONS`: 
+1. The `sk` is null when the `PREROUTING` hook is called but is the `sk` for `skb` null at post routing?
+2. Is XFRM compiled for the Android kernel?
+3. How can SELinux determine whether the packet is to be forwarded? I'm
+   guessing since this is happening at POSTROUTING, then the decsion about
+   whether its destined for the local machine or forwarded is already determined.
+4. Check if SECMARK is enabled on Android.
+
+
 
 # Packet Reception 
 
@@ -209,8 +371,9 @@ void emac_mac_rx_process(struct emac_adapter *adpt, struct emac_rx_queue *rx_q,
 Figure X. Code to pull a packet from the Qualcomm `rx` queue and call, e.g., `af_inet`, in [`drivers/net/qualcomm/emac-emac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac-mac.c#L1087).
 
 
-After the driver sets up the `skb` by adding the device driver to it, it calls to `napi_gro_receive` to deliver it 
-to the upper layers.
+The driver sets up the `skb` such as adding the device driver the `skb. It then
+calls `napi_gro_receive`. GRO is resonsible for aggregating packets for the
+same stream before delivering them to the network stack. 
 
 
 ```c
@@ -478,7 +641,7 @@ Figure. Main receive function for tunnel device. Defined in [`driver/net/tun.c`]
 
 After the packets have been aggregated and passed up the network stack through
 GRO, the `ip_rcv` function is called. Recall that it is not called directly,
-but through the `ip_packet_type` registered with the kernel.
+but through the `ip_packet_type` registered with the kernel. 
 
 ```c
 
@@ -501,6 +664,10 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt,
 ```
 Figure X. The receive routine registered with the kernel. Details at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#558)
 
+The `ip_rcv_core` function is primarly used to get the `skb` ready for processing further up the network stack. This
+includes removing padding that may have been added by the receiving network card, making sure
+the header length and checksum are correct, and setting the transport layer header.
+
 
 ```c
 /*
@@ -518,9 +685,112 @@ static struct sk_buff *ip_rcv_core(struct sk_buff *skb, struct net *net)
 Figure X. `ip_rcv_core` is mainly used for book keeping and sanity checking the packet. Details at `net/ip_input.c`(https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L454)
 
 
-After the `skb` is confirmed to be legit and the appropriate book keeping has been done (e.g., `transport_header` pointer for the `skb` has been updated), `ip_rcv` calls the IPv4 `Netfilter` hooks in the in the `PREROUTING` chain. From what I can tell, unlike the classic 
-`Netfilter` diagram that shows the `PREROUTING` chains being called in the Link Layer (Bridge layer), it is actually called for the
-first time just before the networking code 
+After the `skb` is confirmed to be legit and the appropriate book keeping has
+been done (e.g., `transport_header` pointer for the `skb` has been updated),
+`ip_rcv` calls `ip_rcv_finish` as a function to be called after the rules in
+`Netfilter`'s `PREROUTING` hook have been executed. From what I can tell,
+unlike the classic `Netfilter` diagram that shows the `PREROUTING` chains being
+called in the Link Layer (Bridge layer in the diagram), it is actually called for the first
+time just before the IP layer works its magic.
+
+
+```c
+static inline int
+NF_HOOK(uint8_t pf, unsigned int hook, struct net *net, struct sock *sk, struct sk_buff *skb,
+	struct net_device *in, struct net_device *out,
+	int (*okfn)(struct net *, struct sock *, struct sk_buff *))
+{
+	int ret = nf_hook(pf, hook, net, sk, skb, in, out, okfn);
+	if (ret == 1)
+		ret = okfn(net, sk, skb);
+	return ret;
+}
+
+```
+Figre X. Located at (`include/linux/netfilter.h`)[https://github.com/torvalds/linux/blob/master/include/linux/netfilter.h#L307].
+
+As always `NF_HOOK` is a wrapper for the underlying `nf_hook` function that
+handles the return codes for the Netfilter hooks and ultimately calls
+`ip_rcv_finish` if the packet is allowed to `PASS`.
+
+Most of the parameters to `nf_hook` are self explanetory. First, `pf` which is
+`AF_INET` in the case of IP. The `PRE_ROUTING` hook indicates that packet
+processing occurs before any routing decisions are made. The `net` data
+structure is interesting because, from what I understand, this object
+represents network name spaces. Network name spaces make it possible to
+implement different routing tables across multiple interfaces and implement the
+granular control of the `skb`, aka, policy-routing.
+
+The `indev` is the Qualcomm device that received the packet while the `outdev` is
+currently `NULL`. This will be assigned later when the routing table is looked up.
+
+#### `Questions`
+1. Where and when is the device's network name space `dev` initialized.
+2. MAYBE ANSWERED: What are the values of `indev` and `outdev`? 
+
+```c
+
+/**
+ *	nf_hook - call a netfilter hook
+ *
+ *	Returns 1 if the hook has allowed the packet to pass.  The function
+ *	okfn must be invoked by the caller in this case.  Any other return
+ *	value indicates the packet has been consumed by the hook.
+ */
+static inline int nf_hook(u_int8_t pf, unsigned int hook, struct net *net,
+			  struct sock *sk, struct sk_buff *skb,
+			  struct net_device *indev, struct net_device *outdev,
+			  int (*okfn)(struct net *, struct sock *, struct sk_buff *))
+{
+.
+	rcu_read_lock();
+	switch (pf) {
+	case NFPROTO_IPV4:
+		hook_head = rcu_dereference(net->nf.hooks_ipv4[hook]);
+.
+.
+	if (hook_head) {
+		struct nf_hook_state state;
+
+		nf_hook_state_init(&state, hook, pf, indev, outdev,
+				   sk, net, okfn);
+
+		ret = nf_hook_slow(skb, &state, hook_head, 0);
+	}
+	rcu_read_unlock();
+
+	return ret;
+}
+```
+Figure. Netfilter wrapper function to determine which hook to execute. Details at [`include/linux/netfilter.h`](https://github.com/torvalds/linux/blob/master/include/linux/netfilter.h#L223).
+
+The `nf_hook_state_init` function just takes all the parameters passed to it
+and assigns them to members of the `nf_hook_state` struct.  The real work is
+performed by `nf_hook_slow`, which loops through the Netfilter rules registered
+with the particular address family `AF_INET` and hook `PREROUTING`.
+
+```c
+/* Returns 1 if okfn() needs to be executed by the caller,
+ * -EPERM for NF_DROP, 0 otherwise.  Caller must hold rcu_read_lock. */
+int nf_hook_slow(struct sk_buff *skb, struct nf_hook_state *state,
+		 const struct nf_hook_entries *e, unsigned int s)
+{
+	unsigned int verdict;
+	int ret;
+
+	for (; s < e->num_hook_entries; s++) {
+		verdict = nf_hook_entry_hookfn(&e->hooks[s], skb, state);
+		switch (verdict & NF_VERDICT_MASK) {
+		case NF_ACCEPT:
+			break;
+}
+```
+Figure X. Routine to loop through Netfilter rules. Details at [`net/netfilter/core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/core.c#L617).
+
+Recall that Netfilter initializes its subsystem early. This includes the
+`conntrack` module, which is always registered, and `SELinux` in the case of
+Android.
+
 
 ```c
 static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
