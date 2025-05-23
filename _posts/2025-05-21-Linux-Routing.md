@@ -211,10 +211,55 @@ static void emac_receive_skb(struct emac_rx_queue *rx_q,
 	napi_gro_receive(&rx_q->napi, skb);
 }
 ```
-Figure X. Qualcomm card delivering `skb` to upper layers _via_ NAPI. In [`drivers/net/qualcomm/emac/emac-mac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac-mac.c#L1071)
+Figure X. Qualcomm card delivering `skb` to upper layers _via_ NAPI. In [`drivers/net/qualcomm/emac/emac-mac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac-mac.c#L1071).
+
+Like `NAPI`, Generic Receiver Offload (GRO for short) is a technique the Linux
+kernel uses to aggregate groups of packets, process, and pass them up the
+network stack at once instead of processing every single packet as it is
+received. For more information on GRO, check out the article by
+[DPDK](https://doc.dpdk.org/guides/prog_guide/generic_receive_offload_lib.html).
+
+Like all of the other code, `napi_gro_receive` is a wrapper that does bookkeeping before calling 
+`gro_receive_skb`, which calls `dev_gro_receive`.
+
+```c
+gro_result_t gro_receive_skb(struct gro_node *gro, struct sk_buff *skb)
+{
+	gro_result_t ret;
+
+	__skb_mark_napi_id(skb, gro);
+	trace_napi_gro_receive_entry(skb);
+
+	skb_gro_reset_offset(skb, 0);
+
+	ret = gro_skb_finish(gro, skb, dev_gro_receive(gro, skb));
+	trace_napi_gro_receive_exit(ret);
+
+	return ret;
+}
+```
+Figure X. GRO receive function calls `dev_gro_receive` to pass the `skb` up the network
+stack. More details can be found at [`net/core/gro.c`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L622).
 
 
 
+```c
+static enum gro_result dev_gro_receive(struct gro_node *gro,
+				       struct sk_buff *skb)
+{
+	u32 bucket = skb_get_hash_raw(skb) & (GRO_HASH_BUCKETS - 1);
+.
+.
+
+	pp = INDIRECT_CALL_INET(ptype->callbacks.gro_receive,
+				ipv6_gro_receive, inet_gro_receive,
+				&gro_list->list, skb);
+.
+.
+}
+```
+Figure. GRO calling the `af_inet` packet reception code `inet_gro_receive` for IPv4 or `ipv6_gro_receive` for IPv6. 
+More details at [`net/core/gro.c#L460`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L460).
 
 ### Tun device
 
