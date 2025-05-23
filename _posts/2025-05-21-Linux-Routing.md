@@ -8,12 +8,83 @@ and advanced or policy-based routing.
 
 For details about how the socket is initially created, read my post, [Sockets in the Linux Kernel](https://bmixonba.github.io/2025-05-22-Sockets-in-the-Linux-Kernel/)
 
+## Interfaces
+
+### WiFi/Ethernet
+
+When Linux boots, the devices attached to the chip (peripherals) are registered with the Kernel. In this example,
+we are assuming our device uses a Qualcomm chipset. The Qualcomm device is looked in [`drivers/net/ethernet/qualcomm/`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac.c). The qualcomm device is registered as:
+
+```c
+
+static struct platform_driver emac_platform_driver = {
+	.probe	= emac_probe,
+	.remove = emac_remove,
+	.driver = {
+		.name		= "qcom-emac",
+		.of_match_table = emac_dt_match,
+		.acpi_match_table = ACPI_PTR(emac_acpi_match),
+	},
+	.shutdown = emac_shutdown,
+};
+
+module_platform_driver(emac_platform_driver);
+
+```
+Figure X. Qualcomm Gigabit ethernet card device registration.
+
+The Qualcomm driver uses the `platform_device` interface to register the card.
+[`platform_device`s](https://docs.kernel.org/driver-api/driver-model/platform.html)
+is a generic framework for registering integrated peripherials, such as those
+found on system-on-chips (SoC). The generic data structure includes various callback
+function pointers that the specific device defines and then registers with a call to
+`module_platform_driver`.
+
+In this case, the Qualcomm Ethernet Media Access Controller (EMAC) represents the 
+Qualcomm Gigabit Ethernet device[example](https://www.cast-inc.com/interfaces/internet-protocol-stacks/emac-1g).
+The `.probe` function is callback the Linux kernel calls when the device is powered on. It
+is responsible for allocating various data structures, e.g., `struct net_device`, setting
+up interupts, locks, and other components necessary for the device to run.
+
+The `emac_probe` function sets up `napi` functions to be called whenever the device receives a 
+packet. NAPI (or "new-API") is the updated framework the Linux kernel uses to send and receive
+packets on network interfaces. It uses polling to periodically check the send and receive buffers
+and processes groups of packets at once instead of using interupts, which are less efficient.
+
+```c
+static int emac_probe(struct platform_device *pdev)
+{
+	struct net_device *netdev;
+.
+.
+.
+
+	/* Initialize queues */
+	emac_mac_rx_tx_ring_init_all(pdev, adpt);
+
+	netif_napi_add(netdev, &adpt->rx_q.napi, emac_napi_rtx);
+
+	ret = register_netdev(netdev);
+.
+.
+.
+
+```
+Figure X. `emac_probe` function setting up send (TX) and receive (RX) queues in the device. Code in
+[`drivers/net/qualcomm/emac/emac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac.c#L592C1-L594C28).
+
+
+### Rmnet
+
+
+[link](https://docs.kernel.org/networking/device_drivers/cellular/qualcomm/rmnet.html)
+
+### tun
+
 ## Net Stack Initialization
 
-When Linux is booted, is Networking subsystem registers all of the supported protocols. For 
-the TCP/IP and UDP/IP stacks, this happens in [`af_inet`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L1890).
-
-
+When Linux is booted, its Networking subsystem registers all of the supported protocols. For 
+the TCP/IP and UDP/IP stacks, the `inet_init` function in [`af_inet`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L1890) is responsible for this.
 
 ```c
 
@@ -52,6 +123,95 @@ Figure. Network stack initialization in [`af_inet`](https://github.com/torvalds/
 # Packet Reception 
 
 When a packet is received, the `ip_rcv` function registered with the network stack is called.
+
+## Link Layer
+
+### WiFi
+
+When the Qualcomm card receives a packet, the `emac_napi_rtx` function is called.
+
+
+```c
+/* NAPI */
+static int emac_napi_rtx(struct napi_struct *napi, int budget)
+{
+	struct emac_rx_queue *rx_q =
+		container_of(napi, struct emac_rx_queue, napi);
+	struct emac_adapter *adpt = netdev_priv(rx_q->netdev);
+	struct emac_irq *irq = rx_q->irq;
+	int work_done = 0;
+
+	emac_mac_rx_process(adpt, rx_q, &work_done, budget);
+
+	if (work_done < budget) {
+		napi_complete_done(napi, work_done);
+
+		irq->mask |= rx_q->intr;
+		writel(irq->mask, adpt->base + EMAC_INT_MASK);
+	}
+
+	return work_done;
+}
+
+```
+Figure X. Packet reception code `emac_napi_rtx` in [`drivers/net/qualcomm/emac/emac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac.c#L96).
+
+
+
+### Tun device
+
+VPNs are typically configured with a `tun` device and are defined in [`drivers/net/tun.c`](https://github.com/torvalds/linux/blob/master/drivers/net/tun.c). The `tun` is a character device (and as always, represented as a file). This is backed by
+the `tun_struct` structure
+
+```c
+
+struct tun_struct {
+	struct tun_file __rcu	*tfiles[MAX_TAP_QUEUES];
+	unsigned int            numqueues;
+	unsigned int 		flags;
+	kuid_t			owner;
+	kgid_t			group;
+
+	struct net_device	*dev;
+
+```
+Figure. `tun_struct` representing a tun device.
+
+
+
+```c
+static int __init tun_init(void)
+{
+	int ret = 0;
+
+	pr_info("%s, %s\n", DRV_DESCRIPTION, DRV_VERSION);
+
+	ret = rtnl_link_register(&tun_link_ops);
+.
+```
+Figure. tun registration routine.
+
+
+```c
+/* Ops structure to mimic raw sockets with tun */
+static const struct proto_ops tun_socket_ops = {
+	.peek_len = tun_peek_len,
+	.sendmsg = tun_sendmsg,
+	.recvmsg = tun_recvmsg,
+};
+
+```
+Figure. `tun_socket_ops` callbacks used to receive packets. Defined in [`driver/net/tun.c`](https://github.com/torvalds/linux/blob/master/drivers/net/tun.c#L955).
+
+```c
+static int tun_recvmsg(struct socket *sock, struct msghdr *m, size_t total_len,
+		       int flags)
+{
+```
+Figure. Main receive function for tunnel device. Defined in [`driver/net/tun.c`](https://github.com/torvalds/linux/blob/master/drivers/net/tun.c#L2538)
+
+
+## Network Layer
 
 ```c
 
