@@ -297,16 +297,36 @@ Figure. Postrouting hook for SELinux. Details at [`security/selinux/hooks.c`](ht
 4. Check if SECMARK is enabled on Android.
 
 
+The previous sections covered the various components that Linux intializes once
+its booted. The next section describes the journey of the packet as it transitions
+from electrons `on the wire` to the `skb` representation in the kernel.
 
-# Packet Reception 
+# Packet Reception
 
+After a machine sends a packet, the digital represetion is transformed into an
+analogue (electircal or luminal) signal that travels at some constant times the
+`c` (the speed of light), `k*c`. It eventually reaches youe device's network
+interface card, which acts as an `ADC` or analogue-to-digital-convert where it
+is convered to a digital signal and stored in the network card's memory. The
+card then raises an interupt with the CPU of your device which induces the Kernel
+to execute some interrupt request handler to process the packet. (I think?)
+
+This is the Link layer and is the interface from analogue to digital signals.
+The link layer then processes the packet and passes it up to the network layer
+which further processes the packet, either forwarding it or passing it further
+up to the transport layer, consuming it.
 
 ## Link Layer
 
+Depending on which interface receives the packet, either the Wifi card, mobile data modem, or 
+tun interface, a receive function is invoked. 
+
 ### WiFi
 
-When the Qualcomm card receives a packet, the `emac_napi_rtx` function is called.
-
+As previously described in the initialization section, the Qualcomm driver
+registers a number of functions with the kernel, including the `emac_napi_rtx`
+function. This function is called after the the kernel to handle the interupt
+induced on the CPU by the network card.
 
 ```c
 /* NAPI */
