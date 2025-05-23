@@ -85,7 +85,11 @@ Figure X. `emac_probe` function setting up send (TX) and receive (RX) queues in 
 ## Net Stack Initialization
 
 When Linux is booted, its Networking subsystem registers all of the supported protocols. For 
-the TCP/IP and UDP/IP stacks, the `inet_init` function in [`af_inet`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L1890) is responsible for this.
+the TCP/IP and UDP/IP stacks, the `inet_init` function in [`af_inet`](https://github.com/torvalds/linux/blob/master/net/ipv4/af_inet.c#L1890) is responsible for this. The
+kernel provides a framework for network layer protocols to register a packet
+processing function using the `packet_type` data structure. `af_inet` defines
+the `ip_packet_type` object and registers it with in `inet_init` with a call to
+`dev_add_pack` shown below. 
 
 ```c
 .
@@ -468,7 +472,9 @@ Figure. Main receive function for tunnel device. Defined in [`driver/net/tun.c`]
 
 ## Network Layer
 
-After the packets have been aggregated, the `ip_rcv` function is called.
+After the packets have been aggregated and passed up the network stack through
+GRO, the `ip_rcv` function is called. Recall that it is not called directly,
+but through the `ip_packet_type` registered with the kernel.
 
 ```c
 
@@ -489,20 +495,28 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt,
 		       ip_rcv_finish);
 }
 ```
-Figure X. The receive routine registered with the kernel, at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#558)
+Figure X. The receive routine registered with the kernel. Details at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#558)
 
 
 ```c
-
-
 /*
  * 	Main IP Receive routine.
  */
 static struct sk_buff *ip_rcv_core(struct sk_buff *skb, struct net *net)
 {
+.
+.
+	iph = ip_hdr(skb);
+	skb->transport_header = skb->network_header + iph->ihl*4;
+.
+}
 ```
-Figure X. The main IP receive routine in Linux in `net/ip_input.c`(https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L454)
+Figure X. `ip_rcv_core` is mainly used for book keeping and sanity checking the packet. Details at `net/ip_input.c`(https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L454)
 
+
+After the `skb` is confirmed to be legit and the appropriate book keeping has been done (e.g., `transport_header` pointer for the `skb` has been updated), `ip_rcv` calls the IPv4 `Netfilter` hooks in the in the `PREROUTING` chain. From what I can tell, unlike the classic 
+`Netfilter` diagram that shows the `PREROUTING` chains being called in the Link Layer (Bridge layer), it is actually called for the
+first time just before the networking code 
 
 ```c
 static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
