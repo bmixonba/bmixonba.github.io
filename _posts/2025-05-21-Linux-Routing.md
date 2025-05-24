@@ -2,16 +2,38 @@
 
 This post covers the technical details of packet routing in Linux. Linux
 has mechanisms in place to route packets using basic, "destination" based routing,
-and advanced or policy-based routing. 
+and advanced or policy-based routing. Part of the motivation for this deepdive
+was the observation and subsequently exploited vulnerability by one of
+my buddies, William Tolley. He found that when a VPN is running on Android,
+an attacker can spoof packets to the tun interface that match an existing 
+connection and that the Android device, more specifically, the process
+with the connection, will respond. This went on to become known as the
+blind in/on-path attack, this one being the socalled client-side attack.
 
+Part of the reason this is concerning is because in theory, the Android device
+should not respond to such packets. Why is that? Because the tun interface
+is isolated from the outside world in theory. The fact that it responds
+is a clear violation of non-interference and demonstrates that something
+is going on that prevents the network stack from properly enforcing
+process isolation. Process isolation is a fundamental OS security concept
+and when it is violated, bad things tend to happen. Their assessment 
+of the issue was that because mobile devices have multiple interfaces, are constantly moving around,
+pinging various cell towers, and receiving new IP addresses, it is not possible
+to truly enforce the "strong-host" model, though the Android networking
+team has made attempts to use various Linux constructs, such as 
+multiple routing tables, network name spaces, Netfilter rules, 
+and firewall marks (`fwmark`), to simulate the strong-host model. 
+What this means at the end of the day is that Android uses policy based routing
+to make the VPN service work without completely ruining the user experience.
 
 For details about how the socket is initially created, read my post, [Sockets in the Linux Kernel](https://bmixonba.github.io/2025-05-22-Sockets-in-the-Linux-Kernel/)
 
 # Initialization 
 
-When Linux first boots, it initializes a number of critical systems. For
-networking, this includes the interfaces (e.g., network cards and mobile data
-modems), the network stack (TCP/IP), the the Netfilter framework.
+When Linux, and more specifically Android, first boots, it initializes a number
+of critical systems. For networking, this includes the interfaces (e.g.,
+network cards and mobile data modems), the network stack (TCP/IP), the
+Netfilter framework, SELinux, and adding policy-routing rules.
 
 ## Interfaces
 
@@ -87,6 +109,15 @@ Figure X. `emac_probe` function setting up send (TX) and receive (RX) queues in 
 
 ### tun
 
+```c
+static int selinux_tun_dev_attach(struct sock *sk, void *security)
+{
+	struct tun_security_struct *tunsec = selinux_tun_dev(security);
+	struct sk_security_struct *sksec = selinux_sock(sk);
+
+```
+Figure X. SELinux tun-based hook. Located at [`security/selinux/hooks.c`](https://github.com/torvalds/linux/blob/master/security/selinux/hooks.c#L5680).
+
 ## Network Stack 
 
 When Linux is booted, its Networking subsystem registers all of the supported protocols. For 
@@ -147,8 +178,34 @@ The netfilter framework registers a numbre of critical subsystems to be initiali
 module, the SElinux policy.
 
 ```c
+.
+MODULE_PARM_DESC(enable_hooks, "Always enable conntrack hooks");
+.
+.
+module_init(nf_conntrack_standalone_init);
+module_exit(nf_conntrack_standalone_fini);
 ```
-Figure. Conntrack module registration and initailzation.
+Figure. Conntrack module registration and initailzation. Located at [``](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_standalone.c#L948).
+
+Because Linux supports network namespaces and multiple `networks`, which Android makes extensive use of, conntrack is initialized with a pernet conntrack module.
+
+```c
+static struct pernet_operations nf_conntrack_net_ops = {
+	.init		= nf_conntrack_pernet_init,
+	.exit_batch	= nf_conntrack_pernet_exit,
+	.id		= &nf_conntrack_net_id,
+	.size = sizeof(struct nf_conntrack_net),
+};
+
+static int __init nf_conntrack_standalone_init(void)
+{
+	int ret = nf_conntrack_init_start();
+.
+	ret = register_pernet_subsys(&nf_conntrack_net_ops);
+.
+}
+```
+Figure. Conntrack initialization and registration with Kernel and Netfilter. Located at [``](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_standalone.c#L1182).
 
 SELinux is initialized early in the boot process so that it is able to properly
 label all processes and objects when they are created. Per
@@ -300,6 +357,82 @@ Figure. Postrouting hook for SELinux. Details at [`security/selinux/hooks.c`](ht
 The previous sections covered the various components that Linux intializes once
 its booted. The next section describes the journey of the packet as it transitions
 from electrons `on the wire` to the `skb` representation in the kernel.
+
+## Policy-routing rules
+
+Android adds policy-routing rules to properly route packets from the processes to the tunnel before
+sending them to the VPN server. The following routing rules we taken from a root Android device
+I was using for analysis. To list the policy routing rules, use the `ip rule` command from
+the `iproute2` framework.
+
+```bash
+lynx:/ # ip rule
+0:	from all lookup local 
+10000:	from all fwmark 0xc0000/0xd0000 lookup legacy_system 
+11000:	from all iif lo oif dummy0 uidrange 0-0 lookup dummy0 
+11000:	from all iif lo oif rmnet1 uidrange 0-0 lookup rmnet1 
+11000:	from all iif lo oif wlan0 uidrange 0-0 lookup wlan0 
+12000:	from all iif tun1 lookup local_network 
+13000:	from all fwmark 0x0/0x20000 iif lo uidrange 0-10307 lookup tun1 
+13000:	from all fwmark 0x0/0x20000 iif lo uidrange 10309-20307 lookup tun1 
+13000:	from all fwmark 0x0/0x20000 iif lo uidrange 20309-99999 lookup tun1 
+13000:	from all fwmark 0xc0248/0xcffff lookup tun1 
+14000:	from all fwmark 0x0/0x20000 iif lo uidrange 1-10307 prohibit
+14000:	from all fwmark 0x0/0x20000 iif lo uidrange 10309-20307 prohibit
+14000:	from all fwmark 0x0/0x20000 iif lo uidrange 20309-99999 prohibit
+15040:	from all fwmark 0x10246/0x1ffff iif lo uidrange 10179-10179 lookup wlan0 
+16000:	from all fwmark 0x10063/0x1ffff iif lo lookup local_network 
+16000:	from all fwmark 0xd0064/0xdffff iif lo lookup rmnet1 
+16000:	from all fwmark 0x10246/0x1ffff iif lo lookup wlan0 
+16000:	from all fwmark 0x10248/0x1ffff iif lo uidrange 0-10307 lookup tun1 
+16000:	from all fwmark 0x10248/0x1ffff iif lo uidrange 10309-20307 lookup tun1 
+16000:	from all fwmark 0x10248/0x1ffff iif lo uidrange 20309-99999 lookup tun1 
+16000:	from all fwmark 0x10248/0x1ffff iif lo uidrange 0-0 lookup tun1 
+17000:	from all iif lo oif dummy0 lookup dummy0 
+17000:	from all fwmark 0xc0000/0xc0000 iif lo oif rmnet1 lookup rmnet1 
+17000:	from all iif lo oif wlan0 lookup wlan0 
+17000:	from all iif lo oif tun1 uidrange 0-10307 lookup tun1 
+17000:	from all iif lo oif tun1 uidrange 10309-20307 lookup tun1 
+17000:	from all iif lo oif tun1 uidrange 20309-99999 lookup tun1 
+18000:	from all fwmark 0x0/0x10000 lookup legacy_system 
+19000:	from all fwmark 0x0/0x10000 lookup legacy_network 
+20000:	from all fwmark 0x0/0x10000 lookup local_network 
+22040:	from all fwmark 0x246/0x1ffff iif lo uidrange 10179-10179 lookup wlan0 
+23000:	from all fwmark 0x246/0x1ffff iif lo lookup wlan0 
+25000:	from all fwmark 0x0/0x10000 iif lo uidrange 10179-10179 lookup wlan0_local 
+26000:	from all fwmark 0x0/0x10000 iif lo lookup wlan0_local 
+28000:	from all fwmark 0x248/0xffff lookup wlan0 
+29040:	from all fwmark 0x0/0xffff iif lo uidrange 10179-10179 lookup wlan0 
+31000:	from all fwmark 0x0/0xffff iif lo lookup wlan0 
+32000:	from all unreachable
+```
+Figure. Android policy routing rules.
+
+Lets explain what these rules mean. Take the 5th rule from the top. The general structure
+of in policy routing rule is a follows: `[priority] [filter] [target]`.
+
+```bash
+11000:  from all iif lo oif wlan0 uidrange 0-0 lookup wlan0
+```
+Figure X. initial rule for `wlan0` interface.
+
+The following list explains each component of the rule:
+
+1. `11000` - `priority`: The priority of the rule. 
+2. `from all` - `filter`: This says match on any incoming interface. 
+3. `iif lo`- `filter`: This says match only locally generated traffic, not fowarded traffic.
+4. `oif wlan0` - `filter`: This says match only traffic destined for the `wlan0` interface.
+5. `uidrange 0-0` - `filter`: This says, match the uids in the specified range, so only match the root uid.
+6. `lookup wlan0` - `filter`: This says, lookup the route on the `wlan0` network.
+
+Policy routing rules can be added using the [`iproute2`](https://github.com/iproute2/iproute2/tree/main) framework.
+In a future post, I plan to write about the internals of this tool. For now, it's interesting to note
+that it uses the `netlink` framework and `fib` objects to add rules.
+
+### Policy-routing in Android
+
+TODO: Add info about when and how Android adds its policy routing rules.
+
 
 # Packet Reception
 
@@ -744,6 +877,9 @@ granular control of the `skb`, aka, policy-routing.
 The `indev` is the Qualcomm device that received the packet while the `outdev` is
 currently `NULL`. This will be assigned later when the routing table is looked up.
 
+
+
+
 #### `Questions`
 1. Where and when is the device's network name space `dev` initialized.
 2. MAYBE ANSWERED: What are the values of `indev` and `outdev`? 
@@ -811,6 +947,9 @@ Recall that Netfilter initializes its subsystem early. This includes the
 `conntrack` module, which is always registered, and `SELinux` in the case of
 Android.
 
+`TODO:`
+1. Add some hooks related to PREROUTING.
+2. Maybe talk about the hook registration process?
 
 ```c
 static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
@@ -823,21 +962,395 @@ static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 ```
 Figure X. The finishing function called with Netfilter hook code, at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L433).
 
-![Netfilter calling points for different tables and default chains.](./imgs/Netfilter-packet-flow.png)
-(Original source at [Wikipedia](https://upload.wikimedia.org/wikipedia/commons/3/37/Netfilter-packet-flow.svg))
 
-The function `ip_rcv_finish_core` is ultimately responsible for determining the route the packet is supposed to take.
 
 ```c
 static int ip_rcv_finish_core(struct net *net,
 			      struct sk_buff *skb, struct net_device *dev,
 			      const struct sk_buff *hint)
 {
+	const struct iphdr *iph = ip_hdr(skb);
+	int err, drop_reason;
+	struct rtable *rt;
+.
+.
+	/*
+	 *	Initialise the virtual path cache for the packet. It describes
+	 *	how the packet travels inside Linux networking.
+	 */
+	if (!skb_valid_dst(skb)) {
+		drop_reason = ip_route_input_noref(skb, iph->daddr, iph->saddr,
+						   ip4h_dscp(iph), dev);
+		if (unlikely(drop_reason))
+			goto drop_error;
+		drop_reason = SKB_DROP_REASON_NOT_SPECIFIED;
+.
+
+#ifdef CONFIG_IP_ROUTE_CLASSID
+.
 .
 	rt = skb_rtable(skb);
-.
+
+	return NET_RX_SUCCESS;
+
+
 ```
-Finish X. Core function for recieving a TCP or UDP packet.
+Figure. Located at [`net/ipv4/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L317).
+
+
+```c
+enum skb_drop_reason ip_route_input_noref(struct sk_buff *skb, __be32 daddr,
+					  __be32 saddr, dscp_t dscp,
+					  struct net_device *dev)
+{
+	enum skb_drop_reason reason;
+	struct fib_result res;
+
+	rcu_read_lock();
+	reason = ip_route_input_rcu(skb, daddr, saddr, dscp, dev, &res);
+	rcu_read_unlock();
+
+	return reason;
+}
+EXPORT_SYMBOL(ip_route_input_noref);
+
+```
+Figure. Located at [``](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2526).
+
+```c
+
+```
+Figure. `ip_route_input_rcu`. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2474).
+
+```c
+/*
+ *	NOTE. We drop all the packets that has local source
+ *	addresses, because every properly looped back packet
+ *	must have correct destination already attached by output routine.
+ *	Changes in the enforced policies must be applied also to
+ *	ip_route_use_hint().
+ *
+ *	Such approach solves two big problems:
+ *	1. Not simplex devices are handled properly.
+ *	2. IP spoofing attempts are filtered with 100% of guarantee.
+ *	called with rcu_read_lock()
+ */
+static enum skb_drop_reason
+ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
+		    dscp_t dscp, struct net_device *dev,
+		    struct fib_result *res)
+{
+	enum skb_drop_reason reason = SKB_DROP_REASON_NOT_SPECIFIED;
+	struct in_device *in_dev = __in_dev_get_rcu(dev);
+	struct flow_keys *flkeys = NULL, _flkeys;
+	struct net    *net = dev_net(dev);
+	struct ip_tunnel_info *tun_info;
+.
+.
+	/*
+	 *	Now we are ready to route packet.
+	 */
+.
+	fl4.flowi4_mark = skb->mark;
+
+	fl4.flowi4_uid = sock_net_uid(net, NULL);
+.
+        err = fib_lookup(net, &fl4, res, 0);
+	if (err != 0) {
+		if (!IN_DEV_FORWARD(in_dev))
+.
+.
+	err = -EINVAL;
+	if (res->type == RTN_LOCAL) {
+		reason = fib_validate_source_reason(skb, saddr, daddr, dscp,
+						    0, dev, in_dev, &itag);
+		if (reason)
+			goto martian_source;
+		goto local_input;
+	}
+
+	if (!IN_DEV_FORWARD(in_dev)) {
+		err = -EHOSTUNREACH;
+		goto no_route;
+	}
+	if (res->type != RTN_UNICAST) {
+		reason = SKB_DROP_REASON_IP_INVALID_DEST;
+		goto martian_destination;
+	}
+
+make_route:
+	reason = ip_mkroute_input(skb, res, in_dev, daddr, saddr, dscp,
+				  flkeys);
+}
+```
+Figure `ip_route_input_slow` in [route.c](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2908)
+
+When `ip_route_input_slow` runs, it retrives the `in_device`, and the associated `net` (network)
+with the incoming `net_device`. `in_device` is a pointer to the device that
+received the packet, `net` is the network associated with the device (recall that in Linux, 
+multiple networks and associated routing tables can be defined). `ip_route_input_slow` uses
+a `flow_keys` object `flkeys` to look up the incoming route for the `skb`. The `flkeys` 
+contains the socket mark `mark` and the `uid` of the associated `net` object.
+
+Question:
+1. When is the `skb->mark` field set on the incoming path?
+2. 
+
+The call to `fib_lookup` finds the correct route for the incoming packet. `fib_lookup` has two definitions, one for
+when the kernel supports only one routing table, and one for when multiple tables are available.
+
+```c
+static inline int fib_lookup(struct net *net, struct flowi4 *flp,
+			     struct fib_result *res, unsigned int flags)
+{
+	struct fib_table *tb;
+	int err = -ENETUNREACH;
+
+	flags |= FIB_LOOKUP_NOREF;
+	if (net->ipv4.fib_has_custom_rules)
+		return __fib_lookup(net, flp, res, flags);
+
+	rcu_read_lock();
+
+	res->tclassid = 0;
+
+	tb = rcu_dereference_rtnl(net->ipv4.fib_main);
+	if (tb)
+		err = fib_table_lookup(tb, flp, res, flags);
+
+	if (!err)
+		goto out;
+
+	tb = rcu_dereference_rtnl(net->ipv4.fib_default);
+	if (tb)
+		err = fib_table_lookup(tb, flp, res, flags);
+
+out:
+	if (err == -EAGAIN)
+		err = -ENETUNREACH;
+
+	rcu_read_unlock();
+
+	return err;
+}
+```
+Figure X. `fig_lookup` for multiple tables [374](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L374).
+
+
+When multiple tables are defined, the routing code calls into `__fib_lookup` in
+[`fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108).
+
+```c
+int __fib_lookup(struct net *net, struct flowi4 *flp,
+		 struct fib_result *res, unsigned int flags)
+{
+.
+	err = fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg);
+
+}
+
+```
+Figure X. Located at [``](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L83).
+
+
+```c
+
+int fib_rules_lookup(struct fib_rules_ops *ops, struct flowi *fl,
+		     int flags, struct fib_lookup_arg *arg)
+{
+.
+	list_for_each_entry_rcu(rule, &ops->rules_list, list) {
+jumped:
+		if (!fib_rule_match(rule, ops, fl, flags, arg))
+			continue;
+.
+.
+		if (!fib_rule_match(rule, ops, fl, flags, arg))
+			continue;
+					       fib6_rule_action,
+					       fib4_rule_action,
+					       rule, fl, flags, arg);
+
+}
+```
+Figure X. in `fig_rules.c` Line [108](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108)
+
+
+```c
+static int fib_rule_match(struct fib_rule *rule, struct fib_rules_ops *ops,
+			  struct flowi *fl, int flags,
+			  struct fib_lookup_arg *arg)
+{
+	int iifindex, oifindex, ret = 0;
+.
+
+	if ((rule->mark ^ fl->flowi_mark) & rule->mark_mask)
+		goto out;
+
+	if (rule->tun_id && (rule->tun_id != fl->flowi_tun_key.tun_id))
+		goto out;
+
+	if (rule->l3mdev && !l3mdev_fib_rule_match(rule->fr_net, fl, arg))
+		goto out;
+
+	if (uid_lt(fl->flowi_uid, rule->uid_range.start) ||
+	    uid_gt(fl->flowi_uid, rule->uid_range.end))
+		goto out;
+.
+	return (rule->flags & FIB_RULE_INVERT) ? !ret : ret;
+}
+```
+Figure. Routine for policy-based routing decisions. Located at [`net/core/fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/core/fib_rules.c#L278).
+
+The `fib_rule_match` function is the primary function for making policy-routing decisions. Various 
+pieces of information from the `flowi` (ie., `flow_keys`) object are compared against the `struct fib_rule rule`.
+In the case of VPNs in Android, XXX.
+
+
+
+```c
+INDIRECT_CALLABLE_SCOPE int fib4_rule_action(struct fib_rule *rule,
+					     struct flowi *flp, int flags,
+					     struct fib_lookup_arg *arg)
+{
+	int err = -EAGAIN;
+	struct fib_table *tbl;
+	u32 tb_id;
+.
+.
+	rcu_read_lock();
+
+	tb_id = fib_rule_get_table(rule, arg);
+	tbl = fib_get_table(rule->fr_net, tb_id);
+	if (tbl)
+		err = fib_table_lookup(tbl, &flp->u.ip4,
+				       (struct fib_result *)arg->result,
+				       arg->flags);
+
+	rcu_read_unlock();
+	return err;
+}
+```
+Figure. Located at [`net/ipv4/fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L110).
+
+The routing table for the specific network is found found by calling to `fib_get_table` and passing it `rule->fr_net` and the
+table id.
+
+```c
+* caller must hold either rtnl or rcu read lock */
+struct fib_table *fib_get_table(struct net *net, u32 id)
+{
+	struct fib_table *tb;
+	struct hlist_head *head;
+	unsigned int h;
+
+	if (id == 0)
+		id = RT_TABLE_MAIN;
+	h = id & (FIB_TABLE_HASHSZ - 1);
+
+	head = &net->ipv4.fib_table_hash[h];
+	hlist_for_each_entry_rcu(tb, head, tb_hlist,
+				 lockdep_rtnl_is_held()) {
+		if (tb->tb_id == id)
+			return tb;
+	}
+	return NULL;
+}
+#endif /* CONFIG_IP_MULTIPLE_TABLES */
+```
+Figure. `fib_get_table` when Linux is configured to support multiple routing tables. Located at [``](https://github.com/torvalds/linux/blob/b1427432d3b656fac71b3f42824ff4aea3c9f93b/net/ipv4/fib_frontend.c#L111).
+
+
+
+
+
+Once the route has been stored in `fib_result`, the kernel checks whether the packet should be routed to this machine,
+`res-type==RTN_LOCAL`, fowarded, or dropped, because either a route doesn't exist or because the packet has a
+martian destination.
+
+When the packet is destined for the local box, `fib_validate_source` is called to ensure that the source address
+is valid. Interestingly, in the case of IPSec, source address validation, i.e., `rp_filter` is ignored. 
+
+```c
+/* Ignore rp_filter for packets protected by IPsec. */
+int fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
+			dscp_t dscp, int oif, struct net_device *dev,
+			struct in_device *idev, u32 *itag)
+{
+	int r = secpath_exists(skb) ? 0 : IN_DEV_RPFILTER(idev);
+	struct net *net = dev_net(dev);
+
+	if (!r && !fib_num_tclassid_users(net) &&
+	    (dev->ifindex != oif || !IN_DEV_TX_REDIRECTS(idev))) {
+		if (IN_DEV_ACCEPT_LOCAL(idev))
+			goto ok;
+		/* with custom local routes in place, checking local addresses
+		 * only will be too optimistic, with custom rules, checking
+		 * local addresses only can be too strict, e.g. due to vrf
+		 */
+		if (net->ipv4.fib_has_custom_local_routes ||
+		    fib4_has_custom_rules(net))
+			goto full_check;
+.
+.
+ok:
+		*itag = 0;
+		return 0;
+	}
+full_check:
+	return __fib_validate_source(skb, src, dst, dscp, oif, dev, r, idev,
+				     itag);
+}
+```
+Figure X. Source address validation for locally destined packets. Located at [`net/ipv4/fib_frontend.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_frontend.c#L428.).
+
+
+The validation is performed by `__fib_validate_source`.
+```c
+static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
+				 dscp_t dscp, int oif, struct net_device *dev,
+				 int rpf, struct in_device *idev, u32 *itag)
+{
+	struct net *net = dev_net(dev);
+	enum skb_drop_reason reason;
+	struct flow_keys flkeys;
+	int ret, no_addr;
+	struct fib_result res;
+	struct flowi4 fl4;
+	bool dev_match;
+
+	fl4.flowi4_oif = 0;
+	fl4.flowi4_l3mdev = l3mdev_master_ifindex_rcu(dev);
+	fl4.flowi4_iif = oif ? : LOOPBACK_IFINDEX;
+	fl4.daddr = src;
+	fl4.saddr = dst;
+	fl4.flowi4_tos = inet_dscp_to_dsfield(dscp);
+	fl4.flowi4_scope = RT_SCOPE_UNIVERSE;
+	fl4.flowi4_tun_key.tun_id = 0;
+	fl4.flowi4_flags = 0;
+	fl4.flowi4_uid = sock_net_uid(net, NULL);
+	fl4.flowi4_multipath_hash = 0;
+.
+.
+
+}
+```
+Figure X. Located at [`fib_frontend.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_frontend.c#L344).
+
+
+`ip_mkroute_input` is called.
+```c
+
+```
+
+
+
+`TODO`
+1. Are classids defind in Android?
+
+![Netfilter calling points for different tables and default chains.](./imgs/Netfilter-packet-flow.png)
+(Original source at [Wikipedia](https://upload.wikimedia.org/wikipedia/commons/3/37/Netfilter-packet-flow.svg))
+
 
 The packet is then delivered to the upper layer protocol (TCP or UDP).
 
@@ -1202,20 +1715,6 @@ eventually calls to the IP code. This code is called by
 
 
 ```c
-
-int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt,
-	   struct net_device *orig_dev)
-
-
-
-/*
- * 	Main IP Receive routine.
- */
-static struct sk_buff *ip_rcv_core(struct sk_buff *skb, struct net *net)
-{
-	const struct iphdr *iph;
-
-
 struct rtable *rt_dst_alloc(struct net_device *dev,
 			    unsigned int flags, u16 type,
 			    bool noxfrm)
@@ -1224,95 +1723,69 @@ struct rtable *rt_dst_alloc(struct net_device *dev,
 
 ```
 
-```c
-
-static enum skb_drop_reason
-ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
-		    dscp_t dscp, struct net_device *dev,
-		    struct fib_result *res)
-{
-// Get rid of invalid addresses first
-
-
-	/*
-	 *	Now we are ready to route packet.
-	 */
-//
-	fl4.flowi4_mark = skb->mark;
-
-	fl4.flowi4_uid = sock_net_uid(net, NULL);
-//
-	err = fib_lookup(net, &fl4, res, 0);
-	if (err != 0) {
-		if (!IN_DEV_FORWARD(in_dev))
-	err = fib_lookup(net, &fl4, res, 0);
-
-```
-Figure `ip_route_input_slow` in [route.c](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2908)
-
-The call to `fib_lookup` finds the correct route for the incoming packet. `fib_lookup` has two definitions, one for
-when the kernel supports only one routing table, and one for when multiple tables are available.
-
-```c
-
-static inline int fib_lookup(struct net *net, struct flowi4 *flp,
-			     struct fib_result *res, unsigned int flags)
-{
-
-	flags |= FIB_LOOKUP_NOREF;
-	if (net->ipv4.fib_has_custom_rules)
-		return __fib_lookup(net, flp, res, flags);
-
-
-```
-Figure X. `fig_lookup` for multiple tables [374](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L374).
-
-
-When mutliple tables are defined, the routing code calls into `__fib_lookup` in
-[`fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108).
-
-```c
-int __fib_lookup(struct net *net, struct flowi4 *flp,
-		 struct fib_result *res, unsigned int flags)
-{
-.
-	err = fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg);
-
-}
-.
-
-static int fib_rule_match(struct fib_rule *rule, struct fib_rules_ops *ops,
-			  struct flowi *fl, int flags,
-			  struct fib_lookup_arg *arg)
-{
-	int iifindex, oifindex, ret = 0;
-
-	if ((rule->mark ^ fl->flowi_mark) & rule->mark_mask)
-		goto out;
-
-	if (rule->tun_id && (rule->tun_id != fl->flowi_tun_key.tun_id))
-		goto out;
-
-	if (rule->l3mdev && !l3mdev_fib_rule_match(rule->fr_net, fl, arg))
-		goto out;
-
-	if (uid_lt(fl->flowi_uid, rule->uid_range.start) ||
-	    uid_gt(fl->flowi_uid, rule->uid_range.end))
-		goto out;
-
-
-
-.
-
-int fib_rules_lookup(struct fib_rules_ops *ops, struct flowi *fl,
-		     int flags, struct fib_lookup_arg *arg)
-{
-
-
-```
-Figure X. in `fig_rules.c` Line [108](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108)
-
 
 ## Client: Local to Remote 
+
+
+### Netfilter POSTROUTING
+
+```c
+static unsigned int selinux_ip_postroute(void *priv,
+					 struct sk_buff *skb,
+					 const struct nf_hook_state *state)
+{
+.
+.
+#ifdef CONFIG_XFRM
+	/* If skb->dst->xfrm is non-NULL then the packet is undergoing an IPsec
+	 * packet transformation so allow the packet to pass without any checks
+	 * since we'll have another chance to perform access control checks
+	 * when the packet is on it's final way out.
+	 * NOTE: there appear to be some IPv6 multicast cases where skb->dst
+	 *       is NULL, in this case go ahead and apply access control.
+	 * NOTE: if this is a local socket (skb->sk != NULL) that is in the
+	 *       TCP listening state we cannot wait until the XFRM processing
+	 *       is done as we will miss out on the SA label if we do;
+	 *       unfortunately, this means more work, but it is only once per
+	 *       connection. */
+	if (skb_dst(skb) != NULL && skb_dst(skb)->xfrm != NULL &&
+	    !(sk && sk_listener(sk)))
+		return NF_ACCEPT;
+#endif
+.
+	} else if (sk_listener(sk)) {
+		/* Locally generated packet but the associated socket is in the
+		 * listening state which means this is a SYN-ACK packet.  In
+		 * this particular case the correct security label is assigned
+		 * to the connection/request_sock but unfortunately we can't
+		 * query the request_sock as it isn't queued on the parent
+		 * socket until after the SYN-ACK packet is sent; the only
+		 * viable choice is to regenerate the label like we do in
+		 * selinux_inet_conn_request().  See also selinux_ip_output()
+		 * for similar problems. */
+		u32 skb_sid;
+.
+		/* At this point, if the returned skb peerlbl is SECSID_NULL
+		 * and the packet has been through at least one XFRM
+		 * transformation then we must be dealing with the "final"
+		 * form of labeled IPsec packet; since we've already applied
+		 * all of our access controls on this packet we can safely
+		 * pass the packet. */
+}
+```
+Figure. SELinux hook registered with the POSTROUTING hook. Location [`security/selinux/hooks.c`](https://github.com/torvalds/linux/blob/master/security/selinux/hooks.c#L5905).
+
+```c
+static unsigned int selinux_ip_output(void *priv, struct sk_buff *skb,
+				      const struct nf_hook_state *state)
+{
+	struct sock *sk;
+	u32 sid;
+
+	if (!netlbl_enabled())
+		return NF_ACCEPT;
+```
+Figure X. SELinux `OUT` hook.[``](https://github.com/torvalds/linux/blob/master/security/selinux/hooks.c#L5905).
+
 
 ## Router: Remote to Remote 
