@@ -75,6 +75,183 @@ don't see that changing any time soon.
 For information on how the kernel initializations the network
 stack, read my post about [Linux Network Initialization](https://bmixonba.github.io/2025-05-25-Linux-Networking-Initialization/).
 
+# Packet Structure
+
+When a packet reaches the network card the bytes in the cards DMA are
+interepted using the `struct sk_buff` data structure defined in [`include/linux/skbuff.h`](https://github.com/torvalds/linux/blob/master/include/linux/skbuff.h#L883).
+
+```c
+struct sk_buff {
+	union {
+		struct {
+.
+			union {
+				struct net_device	*dev;
+				/* Some protocols might use this space to store information,
+				 * while device pointer would be NULL.
+				 * UDP receive path is one user.
+				 */
+				unsigned long		dev_scratch;
+			};
+		};
+.
+        }
+.
+	struct sock		*sk;
+.
+ 
+.
+#if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
+	unsigned long		 _nfct;
+#endif
+.
+	__u8			__pkt_type_offset[0];
+	/* public: */
+	__u8			pkt_type:3; /* see PKT_TYPE_MAX */
+.
+.
+	int			skb_iif;
+.
+#ifdef CONFIG_NETWORK_SECMARK
+	__u32		secmark;
+#endif
+
+	union {
+		__u32		mark;
+		__u32		reserved_tailroom;
+	};
+.
+}
+```
+Figure X. Template for the `skb` operated on by various network functions.
+
+This is a big datastructure, so I'm only including the members most 
+relevant for the routing discussion. The semantics of the members are as follows:
+
+ * @sk: Socket we are owned by
+ * @dev: Device we arrived on/are leaving by
+ * @dev_scratch: (aka @dev) alternate use of @dev when @dev would be %NULL
+ * @pkt_type: Packet class
+ * @_nfct: Associated connection, if any (with nfctinfo bits)
+ * @skb_iif: ifindex of device we arrived on
+ * @secmark: security marking
+ * @mark: Generic packet mark
+
+Another key data structure in networking is the `struct net_device`. It represents
+network devices (DUH!) and has following definition:
+
+```c
+struct net_device {
+.
+	struct netdev_queue	*_tx;
+.
+#ifdef CONFIG_NETFILTER_EGRESS
+	struct nf_hook_entries __rcu *nf_hooks_egress;
+#endif
+.
+int			ifindex;
+.
+	struct netdev_rx_queue	*_rx;
+	rx_handler_func_t __rcu	*rx_handler;
+	void __rcu		*rx_handler_data;
+	possible_net_t			nd_net;
+.
+	char			name[IFNAMSIZ];
+.
+#ifdef CONFIG_NETFILTER_INGRESS
+	struct nf_hook_entries __rcu *nf_hooks_ingress;
+#endif
+.
+```
+Figure X. Definition of a `struct net_device`. Located at [`include/linux/netdevice.h`](https://github.com/torvalds/linux/blob/master/include/linux/netdevice.h#L2080).
+
+ *	@_tx:			Array of TX queues
+ *	@nf_hooks_egress:	netfilter hooks executed for egress packets
+ *	@nf_hooks_egress:	netfilter hooks executed for egress packets
+ *	@_rx:			Array of RX queues
+ *	@rx_handler:		handler for received packets
+ *	@rx_handler_data: 	XXX: need comments on this one
+ * 	@nd_net:		Network namespace this network device is inside
+ *	@name:	This is the first field of the "visible" part of this structure
+ *		(i.e. as seen by users in the "Space.c" file).  It is the name
+ *		of the interface.
+ *	@nf_hooks_ingress:	netfilter hooks executed for ingress packets
+
+The network namespace `nd_net` is defined as 
+```c
+typedef struct {
+#ifdef CONFIG_NET_NS
+	struct net __rcu *net;
+#endif
+} possible_net_t;
+```
+Figure X. Definition of network namespace. Located at [`include/net/net_namespace.h`](https://github.com/torvalds/linux/blob/master/include/net/net_namespace.h#L397).
+
+```c
+struct net {
+.
+	struct user_namespace   *user_ns;	/* Owning user namespace */
+.
+	/* core fib_rules */
+	struct list_head	rules_ops;
+
+	struct netns_core	core;
+	struct netns_nexthop	nexthop;
+	struct netns_ipv4	ipv4;
+.
+#ifdef CONFIG_NETFILTER
+	struct netns_nf		nf;
+#if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
+	struct netns_ct		ct;
+#endif
+```
+Figure X. Definition of `struct net`. Located at [`include/net/net_namespace.h`](https://github.com/torvalds/linux/blob/master/include/net/net_namespace.h#L61).
+
+I don't currently know exactly how this works with the rest of the kernel, routing, etc., but I've seent
+the network used throughout the `skb` lifetime, so I'm including it. Unforunately, there is limited documentation
+on what the fields mean, so I'm going to have to figure that out as I go. In any case, I know that
+`ipv4` also has a `rules_ops` field which is used by the routing code for policy-routing decisions. I also
+know that the `nexthop` field is used for routing. The other fields I am including because I have
+a hunch they are used at some point. Anyway, the `rules_ops` is a type of `struct fib_rules_ops`.
+
+```c
+struct netns_ipv4 {
+
+#ifdef CONFIG_IP_MULTIPLE_TABLES
+	struct fib_rules_ops	*rules_ops;
+	struct fib_table __rcu	*fib_main;
+	struct fib_table __rcu	*fib_default;
+```
+Figure X. Routing related data structures for IPv4 routing. Located at [`include/net/netns/ipv4.h`](https://github.com/torvalds/linux/blob/master/include/net/netns/ipv4.h#L50).
+
+```c
+struct fib_rules_ops {
+.
+	int			(*match)(struct fib_rule *,
+					 struct flowi *, int);
+	int			(*configure)(struct fib_rule *,
+					     struct sk_buff *,
+					     struct fib_rule_hdr *,
+					     struct nlattr **,
+					     struct netlink_ext_ack *);
+.
+}
+```
+Figure X. Data structure representing actions to be made during routing decisions. Located at [`include/net/fib_rules.h`](https://github.com/torvalds/linux/blob/master/include/net/fib_rules.h#L64).
+
+In another post, I will cover the `iproute2` tool that is used to configure the
+fib rules. For now, I'm just going to make some educated guesses about what the
+rules look like based on the output of the `ip rule` and `ip route` commands.
+
+Throughout the post, I will represent kernel data structures using something
+like a python or json dictionary. As `skb` moves through the network stack, I
+will update it accordingly. 
+
+```bash
+skbAttacker = {dev:devWlan0, sk:None,_nfct:0, pkt_type=<UNKNOWN>, skb_iif=<UNKNOWN MAYBE 2>, secmark=0, mark=0}
+devWlan0 = {name:"wlan0", nd_net:}
+```
+
 # Packet Reception
 
 After `A` spoofs the packet to `T`, the digital represetion is transformed into
