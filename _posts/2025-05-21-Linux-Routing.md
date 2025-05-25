@@ -45,7 +45,7 @@ mobile model (`wlan0` or `rmnet1` in my case) to be transmitted to the next
 hop, an eventually to `V`. 
 
 The attacker can determine whether such a `T-W` connection exists in the
-following way.  First, the attacker spoofs a packet `p` from `W` to the `T. The
+following way.  First, the attacker spoofs a packet `p` from `W` to the `T`. The
 packet's structure is as follows. The link-layer header has a destination MAC
 address that matches `wlan0`'s MAC address. The network layer header has a
 source IP address equal to `W`'s public IP and a destination IP equal to
@@ -74,16 +74,18 @@ first step in my process.
 # Initialization
 
 For information on how the kernel initializations the network
-stack, read my post about [Linux Network Initialization]().
+stack, read my post about [Linux Network Initialization](https://bmixonba.github.io/2025-05-25-Linux-Networking-Initialization/).
+
 # Packet Reception
 
-After a machine sends a packet, the digital represetion is transformed into an
-analogue (electircal or luminal) signal that travels at some constant times the
-`c` (the speed of light), `k*c`. It eventually reaches youe device's network
-interface card, which acts as an `ADC` or analogue-to-digital-convert where it
-is convered to a digital signal and stored in the network card's memory. The
-card then raises an interupt with the CPU of your device which induces the Kernel
-to execute some interrupt request handler to process the packet. (I think?)
+After `A` spoofs the packet to `T`, the digital represetion is transformed into
+an analogue (electircal or luminal) signal that travels at some constant, `k`
+multiplied by the `c` (the speed of light), `k*c`. It eventually reaches `T`'s 
+device's network interface card, which acts as an `ADC` or
+analogue-to-digital-convert where it is convered to a digital signal and stored
+in the network card's memory. The card then raises an interupt with the CPU of
+your device which induces the Kernel to execute some interrupt request handler
+to process the packet. (I think?)
 
 This is the Link layer and is the interface from analogue to digital signals.
 The link layer then processes the packet and passes it up to the network layer
