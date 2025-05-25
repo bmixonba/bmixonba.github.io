@@ -62,14 +62,13 @@ because the packet is received on the WiFi interface but addressed to
 the tun interface and a response is sent, but it would be good to understand better how
 the fwmarks, routing tables, network names spaces, and associated interface
 behavior along the input, forward, and output paths for incoming and outgoing
-packets. Ultimately, what I hope to gain from this exercise is: 1) more practice
+packets. Ultimately, what I hope to gain from this exercise are: 1) more practice
 writing, because I need it; 2) a deeper understanding of Linux networking because 
 when I first started doing security research I read books on Linux networking
 internals and device driver development (the O'Reilly ones) because I thought
-(and still think) low-level stuff is cool, and, 3) some insights about 
-routing and kernel internals so that I can find ways to break (and fix) it -
-I was always better at breaking things as a kid, but that seems to be the 
-first step in my process.
+(and still think) low-level stuff is cool, and, 3) some insights about how to
+break (and fix) it - I was always better at breaking things as a kid and I
+don't see that changing any time soon.
 
 # Initialization
 
@@ -82,15 +81,17 @@ After `A` spoofs the packet to `T`, the digital represetion is transformed into
 an analogue (electircal or luminal) signal that travels at some constant, `k`
 multiplied by the `c` (the speed of light), `k*c`. It eventually reaches `T`'s 
 device's network interface card, which acts as an `ADC` or
-analogue-to-digital-convert where it is convered to a digital signal and stored
+analogue-to-digital-converter where it is converted to a digital signal and stored
 in the network card's memory. The card then raises an interupt with the CPU of
 your device which induces the Kernel to execute some interrupt request handler
 to process the packet. (I think?)
 
-This is the Link layer and is the interface from analogue to digital signals.
-The link layer then processes the packet and passes it up to the network layer
-which further processes the packet, either forwarding it or passing it further
-up to the transport layer, consuming it.
+This is the Link layer and is the interface from analogue to digital signals
+and the network (IP) layer.  The link layer then processes the packet and
+passes it up to the network layer which further processes the packet, either
+forwarding it to a different interface on the same device, sending it to a
+neighbor (another machine), or passing it further up to the transport layer,
+consuming it.
 
 ## Link Layer
 
@@ -99,10 +100,14 @@ tun interface, a receive function is invoked.
 
 ### WiFi
 
-As previously described in the initialization section, the Qualcomm driver
-registers a number of functions with the kernel, including the `emac_napi_rtx`
-function. This function is called after the the kernel to handle the interupt
-induced on the CPU by the network card.
+As  described in my initialization post, the Qualcomm driver registers a number
+of functions with the kernel, including the `emac_napi_rtx` function. This
+function is called to handle packet reception. From what I understand, in the
+pre-NAPI era, the interupt request handler induced on the CPU by the network
+card would call this function.  I believe with NAPI that the kernel
+periodically polls the card on some predetermined schedule, calling this
+function, and processing batches of packets at once (If this is wrong and
+either I find out or someone tells me, then I'll update this).
 
 ```c
 /* NAPI */
@@ -241,8 +246,7 @@ More details at [`net/core/gro.c#L460`](https://github.com/torvalds/linux/blob/m
 The `gro_*` functions for IP and TCP/UDP are used to aggregate fragmented (and segmented?) packets, but do not
 make any routing decisions.
 
-
-Once the packet streams have been collated, `gro_receive_skb` calls `gro_receive_finish`.
+Once the packet stream has been collated, `gro_receive_skb` calls `gro_receive_finish`.
 
 ```c
 static gro_result_t gro_skb_finish(struct gro_node *gro, struct sk_buff *skb,
