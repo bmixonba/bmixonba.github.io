@@ -75,11 +75,12 @@ don't see that changing any time soon.
 For information on how the kernel initializations the network
 stack, read my post about [Linux Network Initialization](https://bmixonba.github.io/2025-05-25-Linux-Networking-Initialization/).
 
-# Packet Structure
+# Networking Data Structure
 
 When a packet reaches the network card the bytes in the cards DMA are
 interepted using the `struct sk_buff` data structure defined in [`include/linux/skbuff.h`](https://github.com/torvalds/linux/blob/master/include/linux/skbuff.h#L883).
 
+## Packet Representation 
 ```c
 struct sk_buff {
 	union {
@@ -137,6 +138,8 @@ relevant for the routing discussion. The semantics of the members are as follows
  * @secmark: security marking
  * @mark: Generic packet mark
 
+## Netwwork Device Data Structure
+
 Another key data structure in networking is the `struct net_device`. It represents
 network devices (DUH!) and has following definition:
 
@@ -176,6 +179,8 @@ Figure X. Definition of a `struct net_device`. Located at [`include/linux/netdev
  *		(i.e. as seen by users in the "Space.c" file).  It is the name
  *		of the interface.
  *	@nf_hooks_ingress:	netfilter hooks executed for ingress packets
+
+## Network Namespaces and Network Data Structures
 
 The network namespace `nd_net` is defined as 
 ```c
@@ -224,6 +229,74 @@ struct netns_ipv4 {
 ```
 Figure X. Routing related data structures for IPv4 routing. Located at [`include/net/netns/ipv4.h`](https://github.com/torvalds/linux/blob/master/include/net/netns/ipv4.h#L50).
 
+When Linux is configured to support multiple routing tables, the `netns_ipv4`
+struct includes at least `fib_main` representing the `MAIN` fib table and
+`fib_default` representing the default routes to use (I Think). Linux supports
+up to 250-ish tables. The `DEFAULT` and `MAIN` tables have reserved indecies.
+
+```c
+/* Reserved table identifiers */
+
+enum rt_class_t {
+	RT_TABLE_UNSPEC=0,
+/* User defined values */
+	RT_TABLE_COMPAT=252,
+	RT_TABLE_DEFAULT=253,
+	RT_TABLE_MAIN=254,
+	RT_TABLE_LOCAL=255,
+	RT_TABLE_MAX=0xFFFFFFFF
+};
+```
+Figure X. [Identifiers for routing tables.](https://elixir.bootlin.com/linux/v6.14.4/source/include/uapi/linux/rtnetlink.h#L355)
+
+### Routing Tables
+
+Each table has one or more rules associated with it. A user can define up to
+252 unique routing tables. The tables can be defined either using a string or a
+number, but those are mapped to an integer.  There are also four predefined
+routing tables, 
+
+1. `CAMPAT`
+2. `DEFAULT`
+3. `MAIN`
+4. `LOCAL`
+
+#### COMPAT
+
+This routing table is for background compatibility with older versions of Linux (XXX - I am making this up and need to verify that it is true)
+
+#### DEFAULT
+
+The `DEFAULT` routing table is used when no other tables are applicable for a packet.
+
+#### MAIN
+
+The `MAIN` routing tables is used for XXX.
+
+#### LOCAL
+
+The `LOCAL` routing table is used for packets generated and received by the local processes.
+
+
+
+## Forward Information Base (FIB) Data Structure
+
+The Forwarwd Information base (FIB) is the name of the routing data structure used to
+represent routing rules.
+
+```c
+struct fib_table {
+	struct hlist_node	tb_hlist;
+	u32			tb_id;
+	int			tb_num_default;
+	struct rcu_head		rcu;
+	unsigned long 		*tb_data;
+	unsigned long		__data[];
+};
+```
+Figure X. Defintion of a FIB table in Linux. Located at [`include/net/ip_fib.h`](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L257).
+
+
 ```c
 struct fib_rules_ops {
 .
@@ -243,13 +316,18 @@ In another post, I will cover the `iproute2` tool that is used to configure the
 fib rules. For now, I'm just going to make some educated guesses about what the
 rules look like based on the output of the `ip rule` and `ip route` commands.
 
+## Packet Representation in this Post
+
 Throughout the post, I will represent kernel data structures using something
 like a python or json dictionary. As `skb` moves through the network stack, I
 will update it accordingly. 
 
 ```bash
-skbAttacker = {dev:devWlan0, sk:None,_nfct:0, pkt_type=<UNKNOWN>, skb_iif=<UNKNOWN MAYBE 2>, secmark=0, mark=0}
-devWlan0 = {name:"wlan0", nd_net:}
+struct sk_buff skbAttacker = {dev:devWlan0, sk:None,_nfct:0, pkt_type=<UNKNOWN>, skb_iif=<UNKNOWN MAYBE 2>, secmark=0, mark=0}
+struct net_device devWlan0 = {name:"wlan0", nd_net:netWlan0}
+struct net netWlan0 = {}
+struct netns_ipv4 = {rules_ops: Wlan0FibRules}
+struct fib_rules_ops Wlan0FibRules = {}
 ```
 
 # Packet Reception
@@ -1290,51 +1368,6 @@ static int ip_local_deliver_finish(struct net *net, struct sock *sk, struct sk_b
 ```
 Figure X. IP code that calls to TCP or UDP receive routines, or sends an ICMP message in [ip_input](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L317).
 
-
-## Routing Tables
-
-Linux is capable of having multiple routing tables. Each table has one or more
-rules associated with it. A user can define up to 252 unique routing tables. The tables
-can be defined either using a string or a number, but those are mapped to an integer.
-There are also four predefined routing tables, 
-
-1. `CAMPAT`
-2. `DEFAULT`
-3. `MAIN`
-4. `LOCAL`
-
-### COMPAT
-
-This routing table is for background compatibility with older versions of Linux (XXX - I am making this up and need to verify that it is true)
-
-### DEFAULT
-
-The `DEFAULT` routing table is used when no other tables are applicable for a packet.
-
-### MAIN
-
-The `MAIN` routing tables is used for XXX.
-
-### LOCAL
-
-The `LOCAL` routing table is used for packets generated and received by the local processes.
-
-```c
-
-/* Reserved table identifiers */
-
-enum rt_class_t {
-	RT_TABLE_UNSPEC=0,
-/* User defined values */
-	RT_TABLE_COMPAT=252,
-	RT_TABLE_DEFAULT=253,
-	RT_TABLE_MAIN=254,
-	RT_TABLE_LOCAL=255,
-	RT_TABLE_MAX=0xFFFFFFFF
-};
-
-```
-Figure X. [Identifiers for routing tables.](https://elixir.bootlin.com/linux/v6.14.4/source/include/uapi/linux/rtnetlink.h#L355)
 
 
 # Lifetime of a packet
