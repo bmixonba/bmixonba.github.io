@@ -168,17 +168,17 @@ int			ifindex;
 ```
 Figure X. Definition of a `struct net_device`. Located at [`include/linux/netdevice.h`](https://github.com/torvalds/linux/blob/master/include/linux/netdevice.h#L2080).
 
- *	@_tx:			Array of TX queues
- *	@nf_hooks_egress:	netfilter hooks executed for egress packets
- *	@nf_hooks_egress:	netfilter hooks executed for egress packets
- *	@_rx:			Array of RX queues
- *	@rx_handler:		handler for received packets
- *	@rx_handler_data: 	XXX: need comments on this one
- * 	@nd_net:		Network namespace this network device is inside
- *	@name:	This is the first field of the "visible" part of this structure
+ * @_tx:			Array of TX queues
+ * @nf_hooks_egress:	netfilter hooks executed for egress packets
+ * @nf_hooks_egress:	netfilter hooks executed for egress packets
+ * @_rx:			Array of RX queues
+ * @rx_handler:		handler for received packets
+ * @rx_handler_data: 	XXX: need comments on this one
+ * @nd_net:		Network namespace this network device is inside
+ * @name:	This is the first field of the "visible" part of this structure
  *		(i.e. as seen by users in the "Space.c" file).  It is the name
  *		of the interface.
- *	@nf_hooks_ingress:	netfilter hooks executed for ingress packets
+ * @nf_hooks_ingress:	netfilter hooks executed for ingress packets
 
 ## Network Namespaces and Network Data Structures
 
@@ -194,6 +194,8 @@ Figure X. Definition of network namespace. Located at [`include/net/net_namespac
 
 ```c
 struct net {
+.
+	u32			ifindex; /* Index of the device associated with the network */
 .
 	struct user_namespace   *user_ns;	/* Owning user namespace */
 .
@@ -221,11 +223,13 @@ a hunch they are used at some point. Anyway, the `rules_ops` is a type of `struc
 
 ```c
 struct netns_ipv4 {
-
+.
 #ifdef CONFIG_IP_MULTIPLE_TABLES
 	struct fib_rules_ops	*rules_ops;
 	struct fib_table __rcu	*fib_main;
 	struct fib_table __rcu	*fib_default;
+#endif
+.
 ```
 Figure X. Routing related data structures for IPv4 routing. Located at [`include/net/netns/ipv4.h`](https://github.com/torvalds/linux/blob/master/include/net/netns/ipv4.h#L50).
 
@@ -233,6 +237,7 @@ When Linux is configured to support multiple routing tables, the `netns_ipv4`
 struct includes at least `fib_main` representing the `MAIN` fib table and
 `fib_default` representing the default routes to use (I Think). Linux supports
 up to 250-ish tables. The `DEFAULT` and `MAIN` tables have reserved indecies.
+I'm currently not sure where the user-defined tables are stored.
 
 ```c
 /* Reserved table identifiers */
@@ -256,33 +261,21 @@ Each table has one or more rules associated with it. A user can define up to
 number, but those are mapped to an integer.  There are also four predefined
 routing tables, 
 
-1. `CAMPAT`
-2. `DEFAULT`
-3. `MAIN`
-4. `LOCAL`
+1. `CAMPAT`: This routing table is for background compatibility with older
+             versions of Linux (XXX - I am making this up and need to verify
+             that it is true)
+2. `DEFAULT`: The `DEFAULT` routing table is used when no other tables are applicable for a packet.
+3. `MAIN`: The `MAIN` routing tables is used for XXX.
+4. `LOCAL`: The `LOCAL` routing table is used for packets generated and received by the local processes.
 
-#### COMPAT
-
-This routing table is for background compatibility with older versions of Linux (XXX - I am making this up and need to verify that it is true)
-
-#### DEFAULT
-
-The `DEFAULT` routing table is used when no other tables are applicable for a packet.
-
-#### MAIN
-
-The `MAIN` routing tables is used for XXX.
-
-#### LOCAL
-
-The `LOCAL` routing table is used for packets generated and received by the local processes.
-
-
+When multiple tables are supported, a user or program can define them
+using either the `iproute2` tool or talking with `netlink` directly.
+These are represented in the kernel by the `fib_table` data structure.
 
 ## Forward Information Base (FIB) Data Structure
 
-The Forwarwd Information base (FIB) is the name of the routing data structure used to
-represent routing rules.
+The Forwarwd Information base (FIB) is the name of the routing data structure
+used to represent routes. 
 
 ```c
 struct fib_table {
@@ -292,10 +285,15 @@ struct fib_table {
 	struct rcu_head		rcu;
 	unsigned long 		*tb_data;
 	unsigned long		__data[];
+.
 };
 ```
 Figure X. Defintion of a FIB table in Linux. Located at [`include/net/ip_fib.h`](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L257).
 
+Routing rules are represented by the `fib_rules_ops` data structure. This is a
+structure that organizes a number of callback functions that are called for
+various routing operations, such as matching rules and configuring routing
+rules. 
 
 ```c
 struct fib_rules_ops {
@@ -310,25 +308,63 @@ struct fib_rules_ops {
 .
 }
 ```
-Figure X. Data structure representing actions to be made during routing decisions. Located at [`include/net/fib_rules.h`](https://github.com/torvalds/linux/blob/master/include/net/fib_rules.h#L64).
+Figure X. Data structure representing actions to be made during routing
+decisions. Located at
+[`include/net/fib_rules.h`](https://github.com/torvalds/linux/blob/master/include/net/fib_rules.h#L64).
 
-In another post, I will cover the `iproute2` tool that is used to configure the
-fib rules. For now, I'm just going to make some educated guesses about what the
-rules look like based on the output of the `ip rule` and `ip route` commands.
+The `fib_rule` represents an routing rule.
 
-## Packet Representation in this Post
+```c
+
+```
+Figure X. Defintion of a FIB routing rule. Located in [``]().
+
+In another post, I will cover `netlink` and/or the `iproute2` tool that are
+used to configure the fib rules. For now, I'm just going to make some educated
+guesses about what the rules look like based on the output of the `ip rule` and
+`ip route` commands.
+
+## Routing Rules
+11000:	from all iif lo oif rmnet1 uidrange 0-0 lookup rmnet1 
+11000:	from all iif lo oif wlan0 uidrange 0-0 lookup wlan0
+
+## Data Structure Representation in this Post
 
 Throughout the post, I will represent kernel data structures using something
 like a python or json dictionary. As `skb` moves through the network stack, I
 will update it accordingly. 
 
 ```bash
+# Network Devices
+struct net_device devWlan0 = {name:"wlan0", nd_net:netWlan0, _rx : [skbAttacker], _tx:[]}
+struct net_device devRmnet1 = {name:"rmnet1", nd_net:netRmnet0, _rx : [], _tx:[]}
+struct net_device devTun0 = {name:"tun0", nd_net:netTun0, _rx : [], _tx:[]}
+
+# Attacker packet
 struct sk_buff skbAttacker = {dev:devWlan0, sk:None,_nfct:0, pkt_type=<UNKNOWN>, skb_iif=<UNKNOWN MAYBE 2>, secmark=0, mark=0}
-struct net_device devWlan0 = {name:"wlan0", nd_net:netWlan0}
+
+# Wlan0 Network Namespace, FIB table and rules
 struct net netWlan0 = {}
-struct netns_ipv4 = {rules_ops: Wlan0FibRules}
-struct fib_rules_ops Wlan0FibRules = {}
+struct netns_ipv4 = {rules_ops : ,[], fib_main: [] , fib_default: []}
+struct fib_tables* ifaceFibTables = [0: compat, 1: local, 2:wlan0FibTable, 3:rmnet0FibTable, 4:tun0FibTable]
+struct fib_tables wlan0FibTable = []
+struct fib_rules_ops wlan0FibRules = {}
+ifaceRulesOps = [0:compat, 1:local,2:wlanRulesOps,3:rmnet1RulesOps, 4:tun0RulesOps]
+wlanRulesOps = 
+
+# rmnet1 Network Namespace, FIB table a rules
+struct net netRmnet1 = {}
+struct fib_tables rmnet0FibTable = []
+struct fib_rules_ops rmnet1FibRules = {}
+rmnet1RulesOps = 
+
+# tun1 Network Namespace, FIB table and rules
+struct net netTun0 = {}
+struct fib_rules_ops tun0FibRules = {}
+struct fib_tables tun0FibTable = []
+tun0RulesOps = 
 ```
+Figure X. Data structure representations used for this post.
 
 # Packet Reception
 
