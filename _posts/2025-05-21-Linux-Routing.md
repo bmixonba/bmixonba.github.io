@@ -28,6 +28,15 @@ to make the VPN service work without completely ruining the user experience.
 
 For details about how the socket is initially created, read my post, [Sockets in the Linux Kernel](https://bmixonba.github.io/2025-05-22-Sockets-in-the-Linux-Kernel/)
 
+# The Attack
+
+The client-side attack works as follows. Assume that a target, `T`, is connected to a VPN server, `V`, and has an ESTABLISHED TCP
+connection to a website, `W`. `T` sends data to `W` by issuing `write`s (`send` or `sendmsg`) to a socket, `_s_`.
+
+The attacker spoofs a packet from the website to the target that matches this 
+ESTABLISHED connection. In particular, the link-layer header has a destination MAC address equal to MAC
+address of the WiFI interface the cl
+
 # Initialization 
 
 When Linux, and more specifically Android, first boots, it initializes a number
@@ -1341,9 +1350,54 @@ Figure X. Located at [`fib_frontend.c`](https://github.com/torvalds/linux/blob/m
 `ip_mkroute_input` is called.
 ```c
 
+static enum skb_drop_reason
+ip_mkroute_input(struct sk_buff *skb, struct fib_result *res,
+		 struct in_device *in_dev, __be32 daddr,
+		 __be32 saddr, dscp_t dscp, struct flow_keys *hkeys)
+{
+#ifdef CONFIG_IP_ROUTE_MULTIPATH
+	if (res->fi && fib_info_num_path(res->fi) > 1) {
+		int h = fib_multipath_hash(res->fi->fib_net, NULL, skb, hkeys);
+
+		fib_select_multipath(res, h);
+		IPCB(skb)->flags |= IPSKB_MULTIPATH;
+	}
+#endif
+
+	/* create a routing cache entry */
+	return __mkroute_input(skb, res, in_dev, daddr, saddr, dscp);
+}
 ```
+Figure X. Call to `ip_mkroute_input` with the `fib_result` passed. Located at[`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2149).
+
+TODO: Does android have multipath configured?
 
 
+```c
+/* called in rcu_read_lock() section */
+static enum skb_drop_reason
+__mkroute_input(struct sk_buff *skb, const struct fib_result *res,
+		struct in_device *in_dev, __be32 daddr,
+		__be32 saddr, dscp_t dscp)
+{
+	enum skb_drop_reason reason = SKB_DROP_REASON_NOT_SPECIFIED;
+	struct fib_nh_common *nhc = FIB_RES_NHC(*res);
+	struct net_device *dev = nhc->nhc_dev;
+.
+.
+	rth->dst.input = ip_forward;
+
+	rt_set_nexthop(rth, daddr, res, fnhe, res->fi, res->type, itag,
+		       do_cache);
+	lwtunnel_set_redirect(&rth->dst);
+	skb_dst_set(skb, &rth->dst);
+out:
+	reason = SKB_NOT_DROPPED_YET;
+cleanup:
+	return reason;
+}
+```
+Figure X. Located at [``](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L1797).
 
 `TODO`
 1. Are classids defind in Android?
