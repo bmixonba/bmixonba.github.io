@@ -312,21 +312,181 @@ Figure X. Data structure representing actions to be made during routing
 decisions. Located at
 [`include/net/fib_rules.h`](https://github.com/torvalds/linux/blob/master/include/net/fib_rules.h#L64).
 
-The `fib_rule` represents an routing rule.
+The `fib_rule` represents a routing rule. 
 
 ```c
 
+struct fib_rule {
+	struct list_head	list;
+	int			iifindex;
+	int			oifindex;
+	u32			mark;
+	u32			mark_mask;
+.
+	u32			target;
+.
+}
 ```
-Figure X. Defintion of a FIB routing rule. Located in [``]().
+Figure X. Defintion of a FIB routing rule. Located in [`include/net/fib_rules.h`](https://github.com/torvalds/linux/blob/master/include/net/fib_rules.h#L20).
+
+Take the following routing rule as an example:
+
+```bash
+11000:	from all iif lo oif wlan0 uidrange 0-0 lookup wlan0 
+```
+Figure X. Example routing rule.
+
+This rule states that any incoming packets (`from all`) that are locally
+generated ('iff lo`) and destined for the wifi interface (`oif wlan0`) with the
+root uid (`uidrange 0-0`) should lookup the routing rules in the `wlan0`
+network (`lookup wlan0`).
+
 
 In another post, I will cover `netlink` and/or the `iproute2` tool that are
 used to configure the fib rules. For now, I'm just going to make some educated
 guesses about what the rules look like based on the output of the `ip rule` and
 `ip route` commands.
 
-## Routing Rules
+## Routing Rules for this Post
+
+For this post, I will assume the following routing rules:
+```bash
+lynx:/ # ip rule
+.
 11000:	from all iif lo oif rmnet1 uidrange 0-0 lookup rmnet1 
 11000:	from all iif lo oif wlan0 uidrange 0-0 lookup wlan0
+12000:	from all iif tun1 lookup local_network 
+13000:	from all fwmark 0x0/0x20000 iif lo uidrange 0-10307 lookup tun1 
+13000:	from all fwmark 0x0/0x20000 iif lo uidrange 10309-20307 lookup tun1 
+13000:	from all fwmark 0x0/0x20000 iif lo uidrange 20309-99999 lookup tun1 
+13000:	from all fwmark 0xc0248/0xcffff lookup tun1 
+.
+15040:	from all fwmark 0x10246/0x1ffff iif lo uidrange 10179-10179 lookup wlan0 
+.
+16000:	from all fwmark 0x10246/0x1ffff iif lo lookup wlan0 
+16000:	from all fwmark 0x10248/0x1ffff iif lo uidrange 0-10307 lookup tun1 
+16000:	from all fwmark 0x10248/0x1ffff iif lo uidrange 10309-20307 lookup tun1 
+16000:	from all fwmark 0x10248/0x1ffff iif lo uidrange 20309-99999 lookup tun1 
+16000:	from all fwmark 0x10248/0x1ffff iif lo uidrange 0-0 lookup tun1 
+.
+17000:	from all iif lo oif wlan0 lookup wlan0 
+17000:	from all iif lo oif tun1 uidrange 0-10307 lookup tun1 
+17000:	from all iif lo oif tun1 uidrange 10309-20307 lookup tun1 
+17000:	from all iif lo oif tun1 uidrange 20309-99999 lookup tun1 
+.
+22040:	from all fwmark 0x246/0x1ffff iif lo uidrange 10179-10179 lookup wlan0 
+23000:	from all fwmark 0x246/0x1ffff iif lo lookup wlan0 
+.
+```
+Figure X. Routing rules for this post.
+
+These rules were taken from my root Pixel7a Android device with a VPN installed.
+Whenever a packet enters or leave the system, these rules are consulted to make 
+a routing decision. Notice that many of them use the `fwmark/fwmask` for 
+decisions. From what I understand, Android uses these to properly route
+packets between interfaces. But how do these marks actually get placed on
+the `skb` if there are not explicitly part of the packet represented by
+the `skb`? Netfilter comes into play.
+
+## `fwmark`s for this Post
+
+Android adds `fwmark/fwmask` using `iptables`, Netfilter, and kernel supported
+packet marketing for packets written to a socket. The following `fwmark/fwmask`
+rules will be assumed for this post:
+
+```bash
+lynx:/ # iptables -S -t mangle -vn
+-P INPUT ACCEPT
+-P FORWARD ACCEPT
+-P OUTPUT ACCEPT
+-N bw_FORWARD
+-N bw_INPUT
+-N bw_OUTPUT
+-N bw_costly_rmnet2
+-N bw_costly_shared
+-N bw_costly_tun0
+-N bw_costly_tun1
+-N bw_data_saver
+-N bw_global_alert
+-N bw_happy_box
+-N bw_penalty_box
+-N fw_FORWARD
+-N fw_INPUT
+-N fw_OUTPUT
+-N oem_fwd
+-N oem_in
+-N oem_out
+-N st_OUTPUT
+-N st_clear_caught
+-N st_clear_detect
+-N st_penalty_log
+-N st_penalty_reject
+-N tetherctrl_FORWARD
+-N tetherctrl_counters
+-A INPUT -j oem_in
+-A INPUT -j bw_INPUT
+-A INPUT -j fw_INPUT
+-A FORWARD -j oem_fwd
+-A FORWARD -j fw_FORWARD
+-A FORWARD -j bw_FORWARD
+-A FORWARD -j tetherctrl_FORWARD
+-A OUTPUT -j oem_out
+-A OUTPUT -j fw_OUTPUT
+-A OUTPUT -j st_OUTPUT
+-A OUTPUT -j bw_OUTPUT
+-A bw_FORWARD -i tun0 -j bw_costly_tun0
+-A bw_FORWARD -o tun0 -j bw_costly_tun0
+-A bw_FORWARD -i rmnet2 -j bw_costly_rmnet2
+-A bw_FORWARD -o rmnet2 -j bw_costly_rmnet2
+-A bw_FORWARD -i tun1 -j bw_costly_tun1
+-A bw_FORWARD -o tun1 -j bw_costly_tun1
+-A bw_INPUT -j bw_global_alert
+-A bw_INPUT -i tun1 -j bw_costly_tun1
+-A bw_INPUT -i rmnet2 -j bw_costly_rmnet2
+-A bw_INPUT -i tun0 -j bw_costly_tun0
+-A bw_INPUT -p esp -j RETURN
+-A bw_INPUT -m mark --mark 0x100000/0x100000 -j RETURN
+-A bw_INPUT -j MARK --set-xmark 0x100000/0x100000
+-A bw_OUTPUT -j bw_global_alert
+-A bw_OUTPUT -o tun1 -j bw_costly_tun1
+-A bw_OUTPUT -o rmnet2 -j bw_costly_rmnet2
+-A bw_OUTPUT -o tun0 -j bw_costly_tun0
+-A bw_costly_rmnet2 -j bw_penalty_box
+-A bw_costly_rmnet2 -m quota2 ! --name rmnet2  --quota 106542951471  -j REJECT --reject-with icmp-port-unreachable
+-A bw_costly_shared -j bw_penalty_box
+-A bw_costly_tun0 -j bw_penalty_box
+-A bw_costly_tun0 -m quota2 ! --name tun0  --quota 9223372036854775807  -j REJECT --reject-with icmp-port-unreachable
+-A bw_costly_tun1 -j bw_penalty_box
+-A bw_costly_tun1 -m quota2 ! --name tun1  --quota 9223372036854775807  -j REJECT --reject-with icmp-port-unreachable
+-A bw_data_saver -j RETURN
+-A bw_global_alert -m quota2 ! --name globalAlert  --quota 2097152 
+-A bw_happy_box -m bpf --object-pinned /sys/fs/bpf/netd_shared/prog_netd_skfilter_allowlist_xtbpf -j RETURN
+-A bw_happy_box -j bw_data_saver
+-A bw_penalty_box -m bpf --object-pinned /sys/fs/bpf/netd_shared/prog_netd_skfilter_denylist_xtbpf -j REJECT --reject-with icmp-port-unreachable
+-A bw_penalty_box -j bw_happy_box
+-A st_clear_detect -m connmark --mark 0x2000000/0x2000000 -j REJECT --reject-with icmp-port-unreachable
+-A st_clear_detect -m connmark --mark 0x1000000/0x1000000 -j RETURN
+-A st_clear_detect -p tcp -m u32 --u32 "0x0>>0x16&0x3c@0xc>>0x1a&0x3c@0x0&0xffff0000=0x16030000&&0x0>>0x16&0x3c@0xc>>0x1a&0x3c@0x4&0xff0000=0x10000" -j CONNMARK --set-xmark 0x1000000/0x1000000
+-A st_clear_detect -p udp -m u32 --u32 "0x0>>0x16&0x3c@0x8&0xffff0000=0x16fe0000&&0x0>>0x16&0x3c@0x14&0xff0000=0x10000" -j CONNMARK --set-xmark 0x1000000/0x1000000
+-A st_clear_detect -m connmark --mark 0x1000000/0x1000000 -j RETURN
+-A st_clear_detect -p tcp -m state --state ESTABLISHED -m u32 --u32 "0x0>>0x16&0x3c@0xc>>0x1a&0x3c@0x0&0x0=0x0" -j st_clear_caught
+-A st_clear_detect -p udp -j st_clear_caught
+-A st_penalty_log -j CONNMARK --set-xmark 0x1000000/0x1000000
+-A st_penalty_log -j NFLOG
+-A st_penalty_reject -j CONNMARK --set-xmark 0x2000000/0x2000000
+-A st_penalty_reject -j NFLOG
+-A st_penalty_reject -j REJECT --reject-with icmp-port-unreachable
+-A tetherctrl_FORWARD -j bw_global_alert
+-A tetherctrl_FORWARD -i rmnet2 -o wlan0 -m state --state RELATED,ESTABLISHED -g tetherctrl_counters
+-A tetherctrl_FORWARD -i wlan0 -o rmnet2 -m state --state INVALID -j DROP
+-A tetherctrl_FORWARD -i wlan0 -o rmnet2 -g tetherctrl_counters
+-A tetherctrl_FORWARD -j DROP
+-A tetherctrl_counters -i wlan0 -o rmnet2 -j RETURN
+-A tetherctrl_counters -i rmnet2 -o wlan0 -j RETURN
+```
+Figure X. Netfilter rules to mark packets.
+
+The following 
 
 ## Data Structure Representation in this Post
 
@@ -677,8 +837,10 @@ In the `Network Layer` section, I cover how the packet is delivered to the `af_i
 
 ### Tun device
 
-VPNs are typically configured with a `tun` device and are defined in [`drivers/net/tun.c`](https://github.com/torvalds/linux/blob/master/drivers/net/tun.c). The `tun` is a character device (and as always, represented as a file). This is backed by
-the `tun_struct` structure
+VPNs are typically configured with a `tun` device and are defined in
+[`drivers/net/tun.c`](https://github.com/torvalds/linux/blob/master/drivers/net/tun.c).
+The `tun` is a character device (and as always, represented as a file). This is
+backed by the `tun_struct` structure
 
 ```c
 
@@ -727,7 +889,6 @@ static int tun_recvmsg(struct socket *sock, struct msghdr *m, size_t total_len,
 ```
 Figure. Main receive function for tunnel device. Defined in [`driver/net/tun.c`](https://github.com/torvalds/linux/blob/master/drivers/net/tun.c#L2538)
 
-
 ## Network Layer
 
 After the packets have been aggregated and passed up the network stack through
@@ -773,7 +934,7 @@ static struct sk_buff *ip_rcv_core(struct sk_buff *skb, struct net *net)
 .
 }
 ```
-Figure X. `ip_rcv_core` is mainly used for book keeping and sanity checking the packet. Details at `net/ip_input.c`(https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L454)
+Figure X. `ip_rcv_core` is mainly used for book keeping and sanity checking the packet. Details at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L454)
 
 
 After the `skb` is confirmed to be legit and the appropriate book keeping has
@@ -814,9 +975,6 @@ granular control of the `skb`, aka, policy-routing.
 
 The `indev` is the Qualcomm device that received the packet while the `outdev` is
 currently `NULL`. This will be assigned later when the routing table is looked up.
-
-
-
 
 #### `Questions`
 1. Where and when is the device's network name space `dev` initialized.
@@ -953,9 +1111,10 @@ enum skb_drop_reason ip_route_input_noref(struct sk_buff *skb, __be32 daddr,
 EXPORT_SYMBOL(ip_route_input_noref);
 
 ```
-Figure. Located at [``](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2526).
+Figure. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2526).
 
 ```c
+// TODO, add in_route_input_rcu code
 
 ```
 Figure. `ip_route_input_rcu`. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2474).
@@ -1200,8 +1359,6 @@ Figure. `fib_get_table` when Linux is configured to support multiple routing tab
 
 
 
-
-
 Once the route has been stored in `fib_result`, the kernel checks whether the packet should be routed to this machine,
 `res-type==RTN_LOCAL`, fowarded, or dropped, because either a route doesn't exist or because the packet has a
 martian destination.
@@ -1270,7 +1427,6 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 	fl4.flowi4_multipath_hash = 0;
 .
 .
-
 }
 ```
 Figure X. Located at [`fib_frontend.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_frontend.c#L344).
@@ -1299,8 +1455,9 @@ ip_mkroute_input(struct sk_buff *skb, struct fib_result *res,
 ```
 Figure X. Call to `ip_mkroute_input` with the `fib_result` passed. Located at[`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2149).
 
-TODO: Does android have multipath configured?
+TODO: 
 
+1. Does android have multipath configured?
 
 ```c
 /* called in rcu_read_lock() section */
