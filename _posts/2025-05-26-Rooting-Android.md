@@ -22,7 +22,7 @@ The hardware and software requirements are below.
 * Machine (Laptop) to attach to Pixel
 * USB cable to link PC to Pixel
 
-![Pixel7a]({{ site.url }}/img/blog/pixelImage.jpeg)
+![Pixel7a](https://bmixonba.github.io/assets/img/blog/pixelImage.jpeg)
 
 ## Software
 
@@ -53,13 +53,13 @@ Figure 1. Commands to run from machine
 
 1. Get factory image for your device [link](https://developers.google.com/android/images).
 
-![Factory Image2]({{ site.url }}/img/blog/pixel7aAboutphone2.png)
-![Factory Image1]({{ site.url }}/img/blog/pixelFactoryImage.png)
-![Factory Image2]({{ site.url }}/img/blog/pixelFactoryImage2.png)
+![Factory Image2](https://bmixonba.github.io/assets/img/blog/pixel7aAboutphone2.png)
+![Factory Image1](https://bmixonba.github.io/assets/img/blog/pixelFactoryImage.png)
+![Factory Image2](https://bmixonba.github.io/assets/img/blog/pixelFactoryImage2.png)
 
 2. Extract `init_boot` files from the extracted factory image.
 
-![Extract Factory]({{ site.url }}/img/blog/extractFactoryImage1.png)
+![Extract Factory](https://bmixonba.github.io/assets/img/blog/extractFactoryImage1.png)
 
 ```bash
 $ unzip image-lynx-bp1a.250305.019.zip

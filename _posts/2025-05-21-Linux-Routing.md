@@ -1488,7 +1488,7 @@ Figure X. Located at [``](https://github.com/torvalds/linux/blob/master/net/ipv4
 `TODO`
 1. Are classids defind in Android?
 
-![Netfilter calling points for different tables and default chains.]({{ site.url }}/img/blog/Netfilter-packet-flow.png)
+![Netfilter calling points for different tables and default chains.](https://bmixonba.github.io/assets/img/blog/Netfilter-packet-flow.png)
 (Original source at [Wikipedia](https://upload.wikimedia.org/wikipedia/commons/3/37/Netfilter-packet-flow.svg))
 
 
