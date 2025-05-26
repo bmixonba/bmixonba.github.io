@@ -395,96 +395,118 @@ packet marketing for packets written to a socket. The following `fwmark/fwmask`
 rules will be assumed for this post:
 
 ```bash
-lynx:/ # iptables -S -t mangle -vn
--P INPUT ACCEPT
--P FORWARD ACCEPT
--P OUTPUT ACCEPT
--N bw_FORWARD
--N bw_INPUT
--N bw_OUTPUT
--N bw_costly_rmnet2
--N bw_costly_shared
--N bw_costly_tun0
--N bw_costly_tun1
--N bw_data_saver
--N bw_global_alert
--N bw_happy_box
--N bw_penalty_box
--N fw_FORWARD
--N fw_INPUT
--N fw_OUTPUT
--N oem_fwd
--N oem_in
--N oem_out
--N st_OUTPUT
--N st_clear_caught
--N st_clear_detect
--N st_penalty_log
--N st_penalty_reject
--N tetherctrl_FORWARD
--N tetherctrl_counters
--A INPUT -j oem_in
--A INPUT -j bw_INPUT
--A INPUT -j fw_INPUT
--A FORWARD -j oem_fwd
--A FORWARD -j fw_FORWARD
--A FORWARD -j bw_FORWARD
--A FORWARD -j tetherctrl_FORWARD
--A OUTPUT -j oem_out
--A OUTPUT -j fw_OUTPUT
--A OUTPUT -j st_OUTPUT
--A OUTPUT -j bw_OUTPUT
--A bw_FORWARD -i tun0 -j bw_costly_tun0
--A bw_FORWARD -o tun0 -j bw_costly_tun0
--A bw_FORWARD -i rmnet2 -j bw_costly_rmnet2
--A bw_FORWARD -o rmnet2 -j bw_costly_rmnet2
--A bw_FORWARD -i tun1 -j bw_costly_tun1
--A bw_FORWARD -o tun1 -j bw_costly_tun1
--A bw_INPUT -j bw_global_alert
--A bw_INPUT -i tun1 -j bw_costly_tun1
--A bw_INPUT -i rmnet2 -j bw_costly_rmnet2
--A bw_INPUT -i tun0 -j bw_costly_tun0
--A bw_INPUT -p esp -j RETURN
--A bw_INPUT -m mark --mark 0x100000/0x100000 -j RETURN
--A bw_INPUT -j MARK --set-xmark 0x100000/0x100000
--A bw_OUTPUT -j bw_global_alert
--A bw_OUTPUT -o tun1 -j bw_costly_tun1
--A bw_OUTPUT -o rmnet2 -j bw_costly_rmnet2
--A bw_OUTPUT -o tun0 -j bw_costly_tun0
--A bw_costly_rmnet2 -j bw_penalty_box
--A bw_costly_rmnet2 -m quota2 ! --name rmnet2  --quota 106542951471  -j REJECT --reject-with icmp-port-unreachable
--A bw_costly_shared -j bw_penalty_box
--A bw_costly_tun0 -j bw_penalty_box
--A bw_costly_tun0 -m quota2 ! --name tun0  --quota 9223372036854775807  -j REJECT --reject-with icmp-port-unreachable
--A bw_costly_tun1 -j bw_penalty_box
--A bw_costly_tun1 -m quota2 ! --name tun1  --quota 9223372036854775807  -j REJECT --reject-with icmp-port-unreachable
--A bw_data_saver -j RETURN
--A bw_global_alert -m quota2 ! --name globalAlert  --quota 2097152 
--A bw_happy_box -m bpf --object-pinned /sys/fs/bpf/netd_shared/prog_netd_skfilter_allowlist_xtbpf -j RETURN
--A bw_happy_box -j bw_data_saver
--A bw_penalty_box -m bpf --object-pinned /sys/fs/bpf/netd_shared/prog_netd_skfilter_denylist_xtbpf -j REJECT --reject-with icmp-port-unreachable
--A bw_penalty_box -j bw_happy_box
--A st_clear_detect -m connmark --mark 0x2000000/0x2000000 -j REJECT --reject-with icmp-port-unreachable
--A st_clear_detect -m connmark --mark 0x1000000/0x1000000 -j RETURN
--A st_clear_detect -p tcp -m u32 --u32 "0x0>>0x16&0x3c@0xc>>0x1a&0x3c@0x0&0xffff0000=0x16030000&&0x0>>0x16&0x3c@0xc>>0x1a&0x3c@0x4&0xff0000=0x10000" -j CONNMARK --set-xmark 0x1000000/0x1000000
--A st_clear_detect -p udp -m u32 --u32 "0x0>>0x16&0x3c@0x8&0xffff0000=0x16fe0000&&0x0>>0x16&0x3c@0x14&0xff0000=0x10000" -j CONNMARK --set-xmark 0x1000000/0x1000000
--A st_clear_detect -m connmark --mark 0x1000000/0x1000000 -j RETURN
--A st_clear_detect -p tcp -m state --state ESTABLISHED -m u32 --u32 "0x0>>0x16&0x3c@0xc>>0x1a&0x3c@0x0&0x0=0x0" -j st_clear_caught
--A st_clear_detect -p udp -j st_clear_caught
--A st_penalty_log -j CONNMARK --set-xmark 0x1000000/0x1000000
--A st_penalty_log -j NFLOG
--A st_penalty_reject -j CONNMARK --set-xmark 0x2000000/0x2000000
--A st_penalty_reject -j NFLOG
--A st_penalty_reject -j REJECT --reject-with icmp-port-unreachable
--A tetherctrl_FORWARD -j bw_global_alert
--A tetherctrl_FORWARD -i rmnet2 -o wlan0 -m state --state RELATED,ESTABLISHED -g tetherctrl_counters
--A tetherctrl_FORWARD -i wlan0 -o rmnet2 -m state --state INVALID -j DROP
--A tetherctrl_FORWARD -i wlan0 -o rmnet2 -g tetherctrl_counters
--A tetherctrl_FORWARD -j DROP
--A tetherctrl_counters -i wlan0 -o rmnet2 -j RETURN
--A tetherctrl_counters -i rmnet2 -o wlan0 -j RETURN
+lynx:/ # iptables -t mangle -S -v                                                                                                            
+-P PREROUTING ACCEPT -c 2584 728459
+-P INPUT ACCEPT -c 2583 728114
+-P FORWARD ACCEPT -c 0 0
+-P OUTPUT ACCEPT -c 4168 369913
+-P POSTROUTING ACCEPT -c 4171 370108
+-N bw_mangle_POSTROUTING
+-N connmark_mangle_INPUT
+-N connmark_mangle_OUTPUT
+-N idletimer_mangle_POSTROUTING
+-N oem_mangle_post
+-N routectrl_mangle_INPUT
+-N tetherctrl_mangle_FORWARD
+-N wakeupctrl_mangle_INPUT
+-A INPUT -c 2583 728114 -j connmark_mangle_INPUT
+-A INPUT -c 2583 728114 -j wakeupctrl_mangle_INPUT
+-A INPUT -c 2583 728114 -j routectrl_mangle_INPUT
+-A FORWARD -c 0 0 -j tetherctrl_mangle_FORWARD
+-A OUTPUT -c 4168 369913 -j connmark_mangle_OUTPUT
+-A POSTROUTING -c 4171 370108 -j oem_mangle_post
+-A POSTROUTING -c 4171 370108 -j bw_mangle_POSTROUTING
+-A POSTROUTING -c 4171 370108 -j idletimer_mangle_POSTROUTING
+-A bw_mangle_POSTROUTING -o ipsec+ -c 0 0 -j RETURN
+-A bw_mangle_POSTROUTING -m policy --dir out --pol ipsec -c 0 0 -j RETURN
+-A bw_mangle_POSTROUTING -c 4171 370108 -j MARK --set-xmark 0x0/0x100000
+-A bw_mangle_POSTROUTING -m bpf --object-pinned /sys/fs/bpf/netd_shared/prog_netd_skfilter_egress_xtbpf -c 4171 370108
+-A connmark_mangle_INPUT -m connmark --mark 0x0/0xfffff -c 262 19122 -j CONNMARK --save-mark --nfmask 0xfffff --ctmask 0xfffff
+-A connmark_mangle_OUTPUT -m connmark --mark 0x0/0xfffff -c 1466 83327 -j CONNMARK --save-mark --nfmask 0xfffff --ctmask 0xfffff
+-A idletimer_mangle_POSTROUTING -o rmnet1 -c 0 0 -j IDLETIMER --timeout 10 --label 100 --send_nl_msg
+-A idletimer_mangle_POSTROUTING -o wlan0 -c 3495 291406 -j IDLETIMER --timeout 15 --label 102 --send_nl_msg
+-A idletimer_mangle_POSTROUTING -o rmnet2 -c 25 2535 -j IDLETIMER --timeout 10 --label 103 --send_nl_msg
+-A routectrl_mangle_INPUT -i rmnet1 -c 0 0 -j MARK --set-xmark 0xf0064/0x7fefffff
+-A routectrl_mangle_INPUT -i wlan0 -c 1991 324525 -j MARK --set-xmark 0x30066/0x7fefffff
+-A routectrl_mangle_INPUT -i rmnet2 -c 18 6034 -j MARK --set-xmark 0x30067/0x7fefffff
+-A routectrl_mangle_INPUT -i tun1 -c 102 37610 -j MARK --set-xmark 0x30068/0x7fefffff
+-A tetherctrl_mangle_FORWARD -p tcp -m tcp --tcp-flags SYN SYN -c 0 0 -j TCPMSS --clamp-mss-to-pmtu
+-A wakeupctrl_mangle_INPUT -i rmnet1 -m mark --mark 0x80000000/0x80000000 -m limit --limit 10/sec -c 0 0 -j NFLOG --nflog-prefix "432902426637:rmnet1" --nflog-group 3 --nflog-threshold 8
+-A wakeupctrl_mangle_INPUT -i wlan0 -m mark --mark 0x80000000/0x80000000 -m limit --limit 10/sec -c 295 15316 -j NFLOG --nflog-prefix "441492361229:wlan0" --nflog-group 3 --nflog-threshold 8
+-A wakeupctrl_mangle_INPUT -i rmnet2 -m mark --mark 0x80000000/0x80000000 -m limit --limit 10/sec -c 0 0 -j NFLOG --nflog-prefix "445787328525:rmnet2" --nflog-group 3 --nflog-threshold 8
+-A wakeupctrl_mangle_INPUT -i tun1 -m mark --mark 0x80000000/0x80000000 -m limit --limit 10/sec -c 0 0 -j NFLOG --nflog-prefix "450082295821:tun1" --nflog-group 3 --nflog-threshold 8
 ```
 Figure X. Netfilter rules to mark packets.
+
+
+```bash
+lynx:/ # iptables -t mangle -L -vn                                                                                                           
+Chain PREROUTING (policy ACCEPT 2577 packets, 728K bytes)
+ pkts bytes target     prot opt in     out     source               destination         
+
+Chain INPUT (policy ACCEPT 2576 packets, 728K bytes)
+ pkts bytes target     prot opt in     out     source               destination         
+ 2576  728K connmark_mangle_INPUT  all  --  *      *       0.0.0.0/0            0.0.0.0/0           
+ 2576  728K wakeupctrl_mangle_INPUT  all  --  *      *       0.0.0.0/0            0.0.0.0/0           
+ 2576  728K routectrl_mangle_INPUT  all  --  *      *       0.0.0.0/0            0.0.0.0/0           
+
+Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)
+ pkts bytes target     prot opt in     out     source               destination         
+    0     0 tetherctrl_mangle_FORWARD  all  --  *      *       0.0.0.0/0            0.0.0.0/0           
+
+Chain OUTPUT (policy ACCEPT 4158 packets, 369K bytes)
+ pkts bytes target     prot opt in     out     source               destination         
+ 4158  369K connmark_mangle_OUTPUT  all  --  *      *       0.0.0.0/0            0.0.0.0/0           
+
+Chain POSTROUTING (policy ACCEPT 4161 packets, 369K bytes)
+ pkts bytes target     prot opt in     out     source               destination         
+ 4161  369K oem_mangle_post  all  --  *      *       0.0.0.0/0            0.0.0.0/0           
+ 4161  369K bw_mangle_POSTROUTING  all  --  *      *       0.0.0.0/0            0.0.0.0/0           
+ 4161  369K idletimer_mangle_POSTROUTING  all  --  *      *       0.0.0.0/0            0.0.0.0/0           
+
+Chain bw_mangle_POSTROUTING (1 references)
+ pkts bytes target     prot opt in     out     source               destination         
+    0     0 RETURN     all  --  *      ipsec+  0.0.0.0/0            0.0.0.0/0           
+    0     0 RETURN     all  --  *      *       0.0.0.0/0            0.0.0.0/0            policy match dir out pol ipsec
+ 4161  369K MARK       all  --  *      *       0.0.0.0/0            0.0.0.0/0            MARK and 0xffefffff
+ 4161  369K            all  --  *      *       0.0.0.0/0            0.0.0.0/0           match bpf pinned /sys/fs/bpf/netd_shared/prog_netd_skfilter_egress_xtbpf
+
+Chain connmark_mangle_INPUT (1 references)
+ pkts bytes target     prot opt in     out     source               destination         
+  262 19122 CONNMARK   all  --  *      *       0.0.0.0/0            0.0.0.0/0            connmark match  0x0/0xfffff CONNMARK save mask 0xfffff
+
+Chain connmark_mangle_OUTPUT (1 references)
+ pkts bytes target     prot opt in     out     source               destination         
+ 1466 83327 CONNMARK   all  --  *      *       0.0.0.0/0            0.0.0.0/0            connmark match  0x0/0xfffff CONNMARK save mask 0xfffff
+
+Chain idletimer_mangle_POSTROUTING (1 references)
+ pkts bytes target     prot opt in     out     source               destination         
+    0     0 IDLETIMER  all  --  *      rmnet1  0.0.0.0/0            0.0.0.0/0            timeout:10 label:100 send_nl_msg
+ 3490  291K IDLETIMER  all  --  *      wlan0   0.0.0.0/0            0.0.0.0/0            timeout:15 label:102 send_nl_msg
+   25  2535 IDLETIMER  all  --  *      rmnet2  0.0.0.0/0            0.0.0.0/0            timeout:10 label:103 send_nl_msg
+
+Chain oem_mangle_post (1 references)
+ pkts bytes target     prot opt in     out     source               destination         
+
+Chain routectrl_mangle_INPUT (1 references)
+ pkts bytes target     prot opt in     out     source               destination         
+    0     0 MARK       all  --  rmnet1 *       0.0.0.0/0            0.0.0.0/0            MARK xset 0xf0064/0x7fefffff
+ 1984  324K MARK       all  --  wlan0  *       0.0.0.0/0            0.0.0.0/0            MARK xset 0x30066/0x7fefffff
+   18  6034 MARK       all  --  rmnet2 *       0.0.0.0/0            0.0.0.0/0            MARK xset 0x30067/0x7fefffff
+  102 37610 MARK       all  --  tun1   *       0.0.0.0/0            0.0.0.0/0            MARK xset 0x30068/0x7fefffff
+
+Chain tetherctrl_mangle_FORWARD (1 references)
+ pkts bytes target     prot opt in     out     source               destination         
+    0     0 TCPMSS     6    --  *      *       0.0.0.0/0            0.0.0.0/0            tcp flags:0x02/0x02 TCPMSS clamp to PMTU
+
+Chain wakeupctrl_mangle_INPUT (1 references)
+ pkts bytes target     prot opt in     out     source               destination         
+    0     0 NFLOG      all  --  rmnet1 *       0.0.0.0/0            0.0.0.0/0            mark match 0x80000000/0x80000000 limit: avg 10/sec burst 5 nflog-prefix "432902426637:rmnet1" nflog-group 3 nflog-threshold 8
+  292 15184 NFLOG      all  --  wlan0  *       0.0.0.0/0            0.0.0.0/0            mark match 0x80000000/0x80000000 limit: avg 10/sec burst 5 nflog-prefix "441492361229:wlan0" nflog-group 3 nflog-threshold 8
+    0     0 NFLOG      all  --  rmnet2 *       0.0.0.0/0            0.0.0.0/0            mark match 0x80000000/0x80000000 limit: avg 10/sec burst 5 nflog-prefix "445787328525:rmnet2" nflog-group 3 nflog-threshold 8
+    0     0 NFLOG      all  --  tun1   *       0.0.0.0/0            0.0.0.0/0            mark match 0x80000000/0x80000000 limit: avg 10/sec burst 5 nflog-prefix "450082295821:tun1" nflog-group 3 nflog-threshold 8
+```
+Figure X. Netfilter tables.
 
 The following 
 
