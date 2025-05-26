@@ -959,7 +959,7 @@ NF_HOOK(uint8_t pf, unsigned int hook, struct net *net, struct sock *sk, struct 
 }
 
 ```
-Figre X. Located at (`include/linux/netfilter.h`)[https://github.com/torvalds/linux/blob/master/include/linux/netfilter.h#L307].
+Figre X. Located at [`include/linux/netfilter.h`](https://github.com/torvalds/linux/blob/master/include/linux/netfilter.h#L307).
 
 As always `NF_HOOK` is a wrapper for the underlying `nf_hook` function that
 handles the return codes for the Netfilter hooks and ultimately calls
