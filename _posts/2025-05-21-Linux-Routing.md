@@ -1,14 +1,15 @@
 # How Linux Routes Packets
 
-This post covers the technical details of packet routing in Linux. Linux
-has mechanisms in place to route packets using basic, "destination" based routing,
+This post covers the technical details of packet routing in Linux. Linux has
+mechanisms in place to route packets using basic, "destination" based routing,
 and advanced or policy-based routing. Part of the motivation for this deepdive
-was the observation and subsequently exploited vulnerability by one of
-my buddies, William Tolley. He found that when a VPN is running on Android,
-an attacker can spoof packets to the tun interface that match an existing 
-connection and that the Android device, more specifically, the process
-with the connection, will respond. This went on to become known as the
-blind in/on-path attack, this one being the socalled client-side attack.
+was the observation and subsequently exploited vulnerability by my buddies,
+[William Tolley](https://williamtolley.com/), Beau Kujath, and [Jedidiah R
+Crandall](https://jedcrandall.github.io/). He found that when a VPN is running
+on Android, an attacker can spoof packets to the tun interface that match an
+existing connection and that the Android device, more specifically, the process
+with the connection, will respond. This went on to become known as the blind
+in/on-path attack, this one being the socalled client-side attack.
 
 Part of the reason this is concerning is because in theory, the Android device
 should not respond to such packets. Why is that? Because the tun interface
@@ -350,52 +351,82 @@ guesses about what the rules look like based on the output of the `ip rule` and
 ## Routing Rules for this Post
 
 For this post, I will assume the following routing rules:
-```bash
-lynx:/ # ip rule
-.
-11000:	from all iif lo oif rmnet1 uidrange 0-0 lookup rmnet1 
-11000:	from all iif lo oif wlan0 uidrange 0-0 lookup wlan0
-12000:	from all iif tun1 lookup local_network 
-13000:	from all fwmark 0x0/0x20000 iif lo uidrange 0-10307 lookup tun1 
-13000:	from all fwmark 0x0/0x20000 iif lo uidrange 10309-20307 lookup tun1 
-13000:	from all fwmark 0x0/0x20000 iif lo uidrange 20309-99999 lookup tun1 
-13000:	from all fwmark 0xc0248/0xcffff lookup tun1 
-.
-15040:	from all fwmark 0x10246/0x1ffff iif lo uidrange 10179-10179 lookup wlan0 
-.
-16000:	from all fwmark 0x10246/0x1ffff iif lo lookup wlan0 
-16000:	from all fwmark 0x10248/0x1ffff iif lo uidrange 0-10307 lookup tun1 
-16000:	from all fwmark 0x10248/0x1ffff iif lo uidrange 10309-20307 lookup tun1 
-16000:	from all fwmark 0x10248/0x1ffff iif lo uidrange 20309-99999 lookup tun1 
-16000:	from all fwmark 0x10248/0x1ffff iif lo uidrange 0-0 lookup tun1 
-.
-17000:	from all iif lo oif wlan0 lookup wlan0 
-17000:	from all iif lo oif tun1 uidrange 0-10307 lookup tun1 
-17000:	from all iif lo oif tun1 uidrange 10309-20307 lookup tun1 
-17000:	from all iif lo oif tun1 uidrange 20309-99999 lookup tun1 
-.
-22040:	from all fwmark 0x246/0x1ffff iif lo uidrange 10179-10179 lookup wlan0 
-23000:	from all fwmark 0x246/0x1ffff iif lo lookup wlan0 
-.
-```
-Figure X. Routing rules for this post.
 
-These rules were taken from my root Pixel7a Android device with a VPN installed.
-Whenever a packet enters or leave the system, these rules are consulted to make 
-a routing decision. Notice that many of them use the `fwmark/fwmask` for 
-decisions. From what I understand, Android uses these to properly route
-packets between interfaces. But how do these marks actually get placed on
-the `skb` if there are not explicitly part of the packet represented by
-the `skb`? Netfilter comes into play.
+```bash
+lynx:/ $ ip rule show table 1046
+11000:	from all iif lo oif wlan0 uidrange 0-0 lookup 1046 
+15040:	from all fwmark 0x10066/0x1ffff iif lo uidrange 10179-10179 lookup 1046 
+16000:	from all fwmark 0x10066/0x1ffff iif lo lookup 1046 
+17000:	from all iif lo oif wlan0 lookup 1046 
+22040:	from all fwmark 0x66/0x1ffff iif lo uidrange 10179-10179 lookup 1046 
+23000:	from all fwmark 0x66/0x1ffff iif lo lookup 1046 
+28000:	from all fwmark 0x68/0xffff lookup 1046 
+29040:	from all fwmark 0x0/0xffff iif lo uidrange 10179-10179 lookup 1046 
+31000:	from all fwmark 0x0/0xffff iif lo lookup 1046 
+
+lynx:/ $ ip route show table 1046                                                                                                            
+default via 10.0.0.1 dev wlan0 proto static 
+10.0.0.0/24 dev wlan0 proto static scope link 
+```
+Figure X. `wlan0` routing table is 1046 and accompanying routes.
+
+
+```bash
+lynx:/ $ ip rule | grep tun                                                                                                       
+12000:	from all iif tun1 lookup 97 
+17000:	from all iif lo oif tun1 uidrange 0-10307 lookup 1050 
+17000:	from all iif lo oif tun1 uidrange 10309-20307 lookup 1050 
+17000:	from all iif lo oif tun1 uidrange 20309-99999 lookup 1050 
+
+lynx:/ $ ip rule | grep 1050
+13000:	from all fwmark 0x0/0x20000 iif lo uidrange 0-10307 lookup 1050 
+13000:	from all fwmark 0x0/0x20000 iif lo uidrange 10309-20307 lookup 1050 
+13000:	from all fwmark 0x0/0x20000 iif lo uidrange 20309-99999 lookup 1050 
+13000:	from all fwmark 0xc0068/0xcffff lookup 1050 
+16000:	from all fwmark 0x10068/0x1ffff iif lo uidrange 0-10307 lookup 1050 
+16000:	from all fwmark 0x10068/0x1ffff iif lo uidrange 10309-20307 lookup 1050 
+16000:	from all fwmark 0x10068/0x1ffff iif lo uidrange 20309-99999 lookup 1050 
+16000:	from all fwmark 0x10068/0x1ffff iif lo uidrange 0-0 lookup 1050 
+17000:	from all iif lo oif tun1 uidrange 0-10307 lookup 1050 
+17000:	from all iif lo oif tun1 uidrange 10309-20307 lookup 1050 
+17000:	from all iif lo oif tun1 uidrange 20309-99999 lookup 1050 
+```
+Figure X. Policy-routing for `tun1` and its associated table `1050`.
+
+
+
+```bash
+lynx:/ $ ip route show table 1050
+0.0.0.0/2 dev tun1 proto static scope link 
+.
+.
+128.0.0.0/1 dev tun1 proto static scope link
+```
+Figure X. Routes associated with `tun1` routing table.
+
+These rules were taken from my rooted Pixel7a Android device with a VPN
+installed (for more info on how to root a Pixel7a, check out my other post
+[Rooting Android](https://bmixonba.github.io/2025-05-26-Rooting-Android/)).
+
+Whenever a packet enters or leaves the system, these rules are consulted to
+make a routing decision. Notice that many of them use the `fwmark/fwmask` for
+decisions. From what I understand according to Lorenzo Colitti's
+[presentatoin](https://netdevconf.info/1.1/proceedings/slides/colitti-kline-linux-networking-android-devices.pdf)),
+Android uses these constructs to properly route packets between interfaces on
+mobile devices. But how do these marks actually get placed on the `skb` if
+there are not explicitly part of the packet represented by the `skb`? That's where
+Netfilter comes into play.
 
 ## `fwmark`s for this Post
 
 Android adds `fwmark/fwmask` using `iptables`, Netfilter, and kernel supported
-packet marketing for packets written to a socket. The following `fwmark/fwmask`
-rules will be assumed for this post:
+packet marking for packets written to a socket via the `SO_MARK` socket option,
+[man7-socket](https://www.man7.org/linux//man-pages/man7/socket.7.html). The
+following `fwmark/fwmask` rules will be assumed for this post and were dumped
+from my Pixel while I was analyzing VPNs.
 
 ```bash
-lynx:/ # iptables -t mangle -S -v                                                                                                            
+lynx:/ # iptables -t mangle -S -v
 -P PREROUTING ACCEPT -c 2584 728459
 -P INPUT ACCEPT -c 2583 728114
 -P FORWARD ACCEPT -c 0 0
@@ -438,6 +469,8 @@ lynx:/ # iptables -t mangle -S -v
 ```
 Figure X. Netfilter rules to mark packets.
 
+The `mangle` table is the only table with meaingful rules, so I didn't include
+the others. The `mangle` table looks like:
 
 ```bash
 lynx:/ # iptables -t mangle -L -vn                                                                                                           
@@ -508,7 +541,13 @@ Chain wakeupctrl_mangle_INPUT (1 references)
 ```
 Figure X. Netfilter tables.
 
-The following 
+The routing rules, Netfilter, and socket-supported `fwmark` marks allow Android
+to route packets between interfaces in the face of the user constantly
+switching networks, IP addresses, and multiple interfaces of different types
+(i.e., tuntap, wireguard, mobile data, and Wifi). Notice that the default
+policies are fail-open (ACCEPT), so that weird packets will be routed, even if
+they are in an invalid state or, as William, Beau, and Jed discovered, fail
+source address validation
 
 ## Data Structure Representation in this Post
 
@@ -518,27 +557,42 @@ will update it accordingly.
 
 ```bash
 # Network Devices
-struct net_device devWlan0 = {name:"wlan0", nd_net:netWlan0, _rx : [skbAttacker], _tx:[]}
-struct net_device devRmnet1 = {name:"rmnet1", nd_net:netRmnet0, _rx : [], _tx:[]}
-struct net_device devTun0 = {name:"tun0", nd_net:netTun0, _rx : [], _tx:[]}
+struct net_device devWlan0 = {name:"wlan0", ifid:2, nd_net:netWlan0, _rx:[skbAttacker], _tx:[]}
+struct net_device devRmnet1 = {name:"rmnet1", ifid:3, nd_net:netRmnet0, _rx:[], _tx:[]}
+struct net_device devTun0 = {name:"tun0", ifid:4, nd_net:netTun0, _rx:[], _tx:[]}
 
 # Attacker packet
 struct sk_buff skbAttacker = {dev:devWlan0, sk:None,_nfct:0, pkt_type=<UNKNOWN>, skb_iif=<UNKNOWN MAYBE 2>, secmark=0, mark=0}
 
 # Wlan0 Network Namespace, FIB table and rules
-struct net netWlan0 = {}
-struct netns_ipv4 = {rules_ops : ,[], fib_main: [] , fib_default: []}
-struct fib_tables* ifaceFibTables = [0: compat, 1: local, 2:wlan0FibTable, 3:rmnet0FibTable, 4:tun0FibTable]
-struct fib_tables wlan0FibTable = []
-struct fib_rules_ops wlan0FibRules = {}
-ifaceRulesOps = [0:compat, 1:local,2:wlanRulesOps,3:rmnet1RulesOps, 4:tun0RulesOps]
-wlanRulesOps = 
+struct net netWlan0 = {ipv4:netns_ipv4_wlan0}
+struct netns_ipv4_wlan0 = {rules_ops : rules_ops_wlan0, fib_main: fib_main_wlan0, fib_default: fib_defaul_wlan0}
+struct fib_table fib_defaul_wlan0 = [
+  default via 10.0.0.1 dev wlan0 proto static
+]
+struct fib_table fib_main_wlan0 = [
+  10.0.0.0/24 dev wlan0 proto static scope link
+.
+]
+struct fib_rules_ops rules_ops_wlan0 = {
+    {"from" : "all", "iif":"lo","oif":"wlan0", "uidrange" : "0-0",  action: "lookup", "table:"1046"}
+.
+}
 
 # rmnet1 Network Namespace, FIB table a rules
-struct net netRmnet1 = {}
-struct fib_tables rmnet0FibTable = []
-struct fib_rules_ops rmnet1FibRules = {}
-rmnet1RulesOps = 
+struct net netRmnet1 = {ipv4:netns_ipv4_rmnet1}
+struct netns_ipv4_rmnet1 = {rules_ops : rules_ops_rmnet1, fib_main: fib_main_rmnet1, fib_default: fib_default_rmnet1}
+struct fib_table fib_default_rmnet1 = [
+  default via 10.0.0.1 dev wlan0 proto static
+]
+struct fib_table fib_main_rmnet1 = [
+  10.0.0.0/24 dev wlan0 proto static scope link
+.
+]
+struct fib_rules_ops rules_ops_rmnet = {
+    {"from" : "all", "iif":"lo","oif":"wlan0", "uidrange" : "0-0",  action: "lookup", "table:"1046"}
+.
+}
 
 # tun1 Network Namespace, FIB table and rules
 struct net netTun0 = {}
@@ -546,7 +600,7 @@ struct fib_rules_ops tun0FibRules = {}
 struct fib_tables tun0FibTable = []
 tun0RulesOps = 
 ```
-Figure X. Data structure representations used for this post.
+Figure X. Routing data structure used for this post.
 
 # Packet Reception
 
