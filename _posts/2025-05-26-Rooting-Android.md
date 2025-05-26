@@ -62,14 +62,46 @@ Figure 1. Commands to run from machine
 ![Extract Factory](./imgs/extractFactoryImage1.png)
 
 ```bash
-$ 
+$ unzip image-lynx-bp1a.250305.019.zip
 ```
 3. Copy `init_boot` files to device:
 
 ```bash
-$ adb push 
+$ adb push init_boot.img sdcard
 ```
 
 # Patch `init_boot` 
 
+I already have Magisk on my phone, but if you need to, download the latest
+release [(Magisk v29.0)](https://github.com/topjohnwu/Magisk/releases/tag/v29.0), and install it
+with adb install:
+
+```bash
+$ adb install Magisk-v29.0.apk
+```
+
+2. Patch `init_boot.img`: Magisk-v29.0 > Install > "Select `init_boot.img` from sdcard" > Let's Go
+
+3. Copy the file back to your machine 
+
+```bash
+$ adb pull /storage/emulated/0/Download/magisk_patched-29000_tQflw.img
+```
+
 # Flash new `init_boot`
+
+1. Reboot into bootloader:
+
+```bash
+$ adb reboot bootloader
+```
+
+2. Flash the patched `init_boot.img` file
+```bash
+$ fastboot flash init_boot_a magisk_patched-29000_tQflw.img
+$ fastboot flash init_boot_b magisk_patched-29000_tQflw.img
+```
+
+# Reboot
+
+Reboot the device and you're good to go!
