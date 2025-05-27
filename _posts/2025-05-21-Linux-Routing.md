@@ -562,79 +562,85 @@ struct net_device devRmnet1 = {name:"rmnet1", ifid:3, nd_net:netRmnet0, _rx:[], 
 struct net_device devTun0 = {name:"tun0", ifid:4, nd_net:netTun0, _rx:[], _tx:[]}
 
 # Attacker packet
-struct sk_buff skbAttacker = {dev:devWlan0, sk:None,_nfct:0, pkt_type=<UNKNOWN>, skb_iif=<UNKNOWN MAYBE 2>, secmark=0, mark=0}
+struct sk_buff skbAtk = {dev:None, sk:None,_nfct:0, pkt_type=<UNKNOWN>, skb_iif=<UNKNOWN MAYBE 2>, secmark=0, mark=0}
 
 # Wlan0 Network Namespace, FIB table and rules
 struct net netWlan0 = {ipv4:netns_ipv4_wlan0}
-struct netns_ipv4_wlan0 = {rules_ops : rules_ops_wlan0, fib_main: fib_main_wlan0, fib_default: fib_defaul_wlan0}
-struct fib_table fib_defaul_wlan0 = [
-  default via 10.0.0.1 dev wlan0 proto static
+struct netns_ipv4_wlan0 = {rules_ops : rules_ops_wlan0, fib_main: fib_main_wlan0, fib_default: fib_default_wlan0}
+struct fib_table fib_default_wlan0 = [
+  {via:10.0.0.1, dev: wlan0, proto: static}
 ]
 struct fib_table fib_main_wlan0 = [
-  10.0.0.0/24 dev wlan0 proto static scope link
+  {via: 10.0.0.0/24, dev: wlan0, proto: static, scope:link}
 .
 ]
 struct fib_rules_ops rules_ops_wlan0 = {
-    {"from" : "all", "iif":"lo","oif":"wlan0", "uidrange" : "0-0",  action: "lookup", "table:"1046"}
-.
-}
-
-# rmnet1 Network Namespace, FIB table a rules
-struct net netRmnet1 = {ipv4:netns_ipv4_rmnet1}
-struct netns_ipv4_rmnet1 = {rules_ops : rules_ops_rmnet1, fib_main: fib_main_rmnet1, fib_default: fib_default_rmnet1}
-struct fib_table fib_default_rmnet1 = [
-  default via 10.0.0.1 dev wlan0 proto static
-]
-struct fib_table fib_main_rmnet1 = [
-  10.0.0.0/24 dev wlan0 proto static scope link
-.
-]
-struct fib_rules_ops rules_ops_rmnet = {
-    {"from" : "all", "iif":"lo","oif":"wlan0", "uidrange" : "0-0",  action: "lookup", "table:"1046"}
+    {from : all, iif:lo,oif:wlan0, uidrange : 0-0,  action: lookup, table:fib_main_wlan0}
 .
 }
 
 # tun1 Network Namespace, FIB table and rules
-struct net netTun0 = {}
-struct fib_rules_ops tun0FibRules = {}
-struct fib_tables tun0FibTable = []
-tun0RulesOps = 
+struct net netTun0 = {ipv4:netns_ipv4_tun1}
+struct netns_ipv4_tun1 = {rules_ops : rules_ops_tun1, fib_main: fib_main_tun1, fib_default: fib_default_tun1}
+struct fib_tables fib_main_tun1 = [
+    {via:0.0.0.0/2, dev:tun1, proto: static, scope:link}
+.
+.
+    {via: 128.0.0.0/1, dev: tun1,  proto: static, scope:link}
+]
+struct fib_tables fib_default_tun1 = []
+struct fib_rules_ops rules_ops_tun1 = {
+    {from:all,fwmark:0x0, fwmask:0x20000, iif:lo, uidrange:0-10307, action : lookup fib_main_tun1}
+    {from:all,fwmark:0xc0068, fwmask:0xcffff, lookup 1050}
+    {from:all,fwmark:0x10068, fwmask:0x1ffff, iif:lo, uidrange:0-10307 action :lookup fib_main_tun1}
+.
+    {from:all, fwmark:0x10068 fwmask:0x1ffff, iif:lo, uidrange:0-0, action: lookup fib_main_tun1}
+.
+    {from:all, iif:lo, oif:tun1, uidrange:0-10307, action: lookup fib_main_tun1}
+}
 ```
 Figure X. Routing data structure used for this post.
 
 # Packet Reception
 
-After `A` spoofs the packet to `T`, the digital represetion is transformed into
-an analogue (electircal or luminal) signal that travels at some constant, `k`
-multiplied by the `c` (the speed of light), `k*c`. It eventually reaches `T`'s 
-device's network interface card, which acts as an `ADC` or
-analogue-to-digital-converter where it is converted to a digital signal and stored
-in the network card's memory. The card then raises an interupt with the CPU of
-your device which induces the Kernel to execute some interrupt request handler
-to process the packet. (I think?)
+After `A` (me) spoofs the packet, `skbAtk`, to `T` (you), the digital
+represetion is transformed into an analogue (electircal or luminal) signal that
+travels at some constant, `k` multiplied by the `c` (the speed of light),
+`k*c`. It eventually reaches `T`'s device's network interface card, which acts
+as an `ADC` or analogue-to-digital-converter where it is converted to a digital
+signal and stored in the network card's memory or the DMA of the CPU if a SoC
+(I think). Depending on the kernel, he card either raises an interupt with the
+CPU of your device which induces the Kernel to execute some interrupt request
+handler to process the packet (I think?) or the kernel periodically invokes a
+NAPI function to process packets in chunks. I will cover NAPI a bit later, but
+for now all you need to know is that on older versions of Linux, the former
+is used, while NAPI is used, to the best of my knowledge, on newer versions
+of Linux.
 
-This is the Link layer and is the interface from analogue to digital signals
-and the network (IP) layer.  The link layer then processes the packet and
-passes it up to the network layer which further processes the packet, either
-forwarding it to a different interface on the same device, sending it to a
-neighbor (another machine), or passing it further up to the transport layer,
-consuming it.
+This is the Link layer (Layer 2) and is the interface between analogue to
+digital signals and the network (IP) layer. The link layer then processes the
+packet and passes it up to the network layer (Layer 3) which further processes
+and routes the packet. In the routing step, the network layer inspects the
+destination ip address of `skbA` and either passes it to the forwarding path or
+up the network stack to the transport layer (Layer 4). In the former case, the
+network layer will either write `skbA` to a different interface on the same
+device, e.g., wlan0 to tun1 or send it to a "neighbor" device, such as my home
+wifi access point or mobile carrier network, or pass it further up to the
+transport layer, consuming it.
 
 ## Link Layer
 
-Depending on which interface receives the packet, either the Wifi card, mobile data modem, or 
-tun interface, a receive function is invoked. 
+Regadless of which interface is called, each has a set of functions
+that it registers with the kernel, informing  the kernel that
+when a particular even happens, it should call the registered function.
 
 ### WiFi
 
-As  described in my initialization post, the Qualcomm driver registers a number
-of functions with the kernel, including the `emac_napi_rtx` function. This
-function is called to handle packet reception. From what I understand, in the
-pre-NAPI era, the interupt request handler induced on the CPU by the network
-card would call this function.  I believe with NAPI that the kernel
-periodically polls the card on some predetermined schedule, calling this
-function, and processing batches of packets at once (If this is wrong and
-either I find out or someone tells me, then I'll update this).
+As described in my post, [Linux Networking
+Initialization](https://bmixonba.github.io/2025-05-25-Linux-Networking-Initialization/),
+each interface is represented by a `struct net_device` and has a set of
+associated `poll` function that it registers when using NAPI. For the Qualcomm
+device, `wlan0`, the `emac_napi_poll` is the poll function called to handle received packets.
 
 ```c
 /* NAPI */
@@ -662,10 +668,11 @@ static int emac_napi_rtx(struct napi_struct *napi, int budget)
 Figure X. Packet reception code `emac_napi_rtx` in [`drivers/net/qualcomm/emac/emac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac.c#L96).
 
 This is just a wrapper for `emac_mac_rx_process`, which does the actual packet
-processes and calls, e.g., the `af_inet` (TCP/IP) stack.  Before this happens a
-lot of sanity checks are performed. For the Qualcomm driver, the generic
-receiption offloading (GRO) framework ised used instead of calling the `ip_rcv`
-routine directly every time an interupt from the network card is raised.
+processing and calls, e.g., the `af_inet` (TCP/IP) stack.  Before this happens
+internal book keeping, such as setting the Layer 3 protocol is set and sanity
+checks are performed. For the Qualcomm driver, the generic receiption
+offloading (GRO) framework is used instead of calling the `ip_rcv` routine
+directly every time an packet is received.
 
 ```c
 /* Process receive event */
@@ -696,13 +703,19 @@ void emac_mac_rx_process(struct emac_adapter *adpt, struct emac_rx_queue *rx_q,
 .
 }
 ```
-Figure X. Code to pull a packet from the Qualcomm `rx` queue and call, e.g., `af_inet`, in [`drivers/net/qualcomm/emac-emac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac-mac.c#L1087).
+Figure X. Code to pull a packet from the Qualcomm `rx` queue and call, e.g.,
+`af_inet`, in
+[`drivers/net/qualcomm/emac-emac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac-mac.c#L1087).
 
-
-The driver sets up the `skb` such as adding the device driver the `skb. It then
+The driver sets up `skbAtk`, such as setting the `devWlan0` field of `skbAtk` to
+the device on which the `skbAtk` was received. It then
 calls `napi_gro_receive`. GRO is resonsible for aggregating packets for the
 same stream before delivering them to the network stack. 
 
+```bash
+struct sk_buff skbAtk = {dev:devWlan0, sk:None,_nfct:0, pkt_type=<UNKNOWN>, skb_iif=<UNKNOWN MAYBE 2>, secmark=0, mark=0}
+```
+Figure X. `skbAtk` after the call to `emac_mac_rx_process
 
 ```c
 /* Push the received skb to upper layers */
@@ -722,14 +735,15 @@ static void emac_receive_skb(struct emac_rx_queue *rx_q,
 ```
 Figure X. Qualcomm card delivering `skb` to upper layers _via_ NAPI. In [`drivers/net/qualcomm/emac/emac-mac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac-mac.c#L1071).
 
-Like `NAPI`, Generic Receiver Offload (GRO for short) is a technique the Linux
-kernel uses to aggregate groups of packets, process, and pass them up the
-network stack at once instead of processing every single packet as it is
-received. For more information on GRO, check out the article by
+Like NAPI, GRO (Generic Receiver Offload) is a technique the Linux kernel uses
+to aggregate groups of packets for the same stream and pass them up the network
+stack at once instead of processing every single packet as it is received. For
+more information on GRO, check out the article by
 [DPDK](https://doc.dpdk.org/guides/prog_guide/generic_receive_offload_lib.html).
 
-Like all of the other code, `napi_gro_receive` is a wrapper that does bookkeeping before calling 
-`gro_receive_skb`, which calls `dev_gro_receive`.
+The `napi_gro_receive` function is a wrapper that does bookkeeping before calling 
+and includes calls to trace the flow of `skbAtk` through the system
+before calling `dev_gro_receive`.
 
 ```c
 gro_result_t gro_receive_skb(struct gro_node *gro, struct sk_buff *skb)
@@ -770,8 +784,8 @@ static enum gro_result dev_gro_receive(struct gro_node *gro,
 Figure. GRO calling the `af_inet` packet reception code `inet_gro_receive` for IPv4 or `ipv6_gro_receive` for IPv6. 
 More details at [`net/core/gro.c#L460`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L460).
 
-The `gro_*` functions for IP and TCP/UDP are used to aggregate fragmented (and segmented?) packets, but do not
-make any routing decisions.
+The `gro_*` functions for IP and TCP/UDP are used to aggregate fragmented (and
+segmented?) packets, but do not make any routing decisions.
 
 Once the packet stream has been collated, `gro_receive_skb` calls `gro_receive_finish`.
 
