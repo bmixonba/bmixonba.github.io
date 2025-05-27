@@ -896,7 +896,9 @@ Figure X. Located in [`net/core/dev.c`](https://github.com/torvalds/linux/blob/m
 Finally, the `__netif_receive_skb_list_ptype` calls `ip_rcv` (or `ip_list_rcv`)
 for `skbAtk`.  Up to this point, only a few fields in `skbAtk` have change. The
 `dev` and `protocol` fields have been changed. A few others have also been
-changed, but from what I can tell, they do not affect routing.
+changed, but from what I can tell, they do not affect routing. Notably, neither
+the `sk` nor `mark` fields have been changed. As we will see, this happens
+in the network layer code.
 
 ```c
 static inline void __netif_receive_skb_list_ptype(struct list_head *head,
