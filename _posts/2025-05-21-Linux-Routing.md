@@ -797,6 +797,9 @@ static gro_result_t gro_skb_finish(struct gro_node *gro, struct sk_buff *skb,
 	case GRO_NORMAL:
 		gro_normal_one(gro, skb, 1);
 		break;
+.
+.
+}
 ```
 Figure. `gro_skb_finish` is called once GRO has aggregated a stream of packets. Details at [`net/core/gro.c`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L596).
 
