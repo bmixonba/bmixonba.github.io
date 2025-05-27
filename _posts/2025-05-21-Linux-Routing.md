@@ -846,7 +846,8 @@ void netif_receive_skb_list_internal(struct list_head *head)
 }
 ```
 Figure. Device receive function interface. This function recieves a list of `skb`s from GRO
-and passes them up the network stack.
+and passes them up the network stack. Located in [`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L6091)
+
 
 ```c
 static void __netif_receive_skb_list(struct list_head *head)
@@ -862,9 +863,16 @@ static void __netif_receive_skb_list(struct list_head *head)
 			if (!list_empty(&sublist))
 				__netif_receive_skb_list_core(&sublist, pfmemalloc);
 .
+}
 ```
-Figure X. More indirection to get to Network stack. Mostly book keeping for memory
-and to process the list of GRO packets. Located in [`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L6005).
+Figure X. More indirection to get to Network stack. Mostly book keeping for
+memory and to process the list of GRO packets. Located in
+[`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L6005).
+
+The `__netif_receive_skb_list_core` is the "core" function for handling lists of packets
+sent up the network stack from GRO. This function organizes all of the packets of a particular
+type into a single, homogeneous sublist and then passes it to 
+`__netif_receive_skb_list_ptype` to call the network layer receive handler for that specific `packet_type`.
 
 ```c
 static void __netif_receive_skb_list_core(struct list_head *head, bool pfmemalloc)
@@ -885,6 +893,10 @@ static void __netif_receive_skb_list_core(struct list_head *head, bool pfmemallo
 ```
 Figure X. Located in [`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L5939)
 
+Finally, the `__netif_receive_skb_list_ptype` calls `ip_rcv` (or `ip_list_rcv`)
+for `skbAtk`.  Up to this point, only a few fields in `skbAtk` have change. The
+`dev` and `protocol` fields have been changed. A few others have also been
+changed, but from what I can tell, they do not affect routing.
 
 ```c
 static inline void __netif_receive_skb_list_ptype(struct list_head *head,
