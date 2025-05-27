@@ -125,7 +125,7 @@ struct sk_buff {
 .
 }
 ```
-Figure X. Template for the `skb` operated on by various network functions.
+Figure 1. Template for the `skb` operated on by various network functions.
 
 This is a big datastructure, so I'm only including the members most 
 relevant for the routing discussion. The semantics of the members are as follows:
@@ -167,7 +167,7 @@ int			ifindex;
 #endif
 .
 ```
-Figure X. Definition of a `struct net_device`. Located at [`include/linux/netdevice.h`](https://github.com/torvalds/linux/blob/master/include/linux/netdevice.h#L2080).
+Figure 2. Definition of a `struct net_device`. Located at [`include/linux/netdevice.h`](https://github.com/torvalds/linux/blob/master/include/linux/netdevice.h#L2080).
 
  * @_tx:			Array of TX queues
  * @nf_hooks_egress:	netfilter hooks executed for egress packets
@@ -191,7 +191,11 @@ typedef struct {
 #endif
 } possible_net_t;
 ```
-Figure X. Definition of network namespace. Located at [`include/net/net_namespace.h`](https://github.com/torvalds/linux/blob/master/include/net/net_namespace.h#L397).
+Figure 3. Definition of network namespace. Located at [`include/net/net_namespace.h`](https://github.com/torvalds/linux/blob/master/include/net/net_namespace.h#L397).
+
+The `struct net` field in each `net_device is, I think, just a reference to the
+`init_net` network namespace defined in
+[`net/core/net_namespace.c`](https://github.com/torvalds/linux/blob/015a99fa76650e7d6efa3e36f20c0f5b346fe9ce/net/core/net_namespace.c#L48). Each network namespace contains a reference to the `user_namespace`, `user_ns`, for each "user" (process). This is used the enforce access control, such as checks to `CAP_SYS_ADMIN`. It also contains the routing rules (`rules_ops`), and IPv4 (and v6) related info in the `ipv4` struct, Netfilter, and conntrack related structures.
 
 ```c
 struct net {
@@ -213,23 +217,32 @@ struct net {
 	struct netns_ct		ct;
 #endif
 ```
-Figure X. Definition of `struct net`. Located at [`include/net/net_namespace.h`](https://github.com/torvalds/linux/blob/master/include/net/net_namespace.h#L61).
+Figure 4. Definition of `struct net`. Located at [`include/net/net_namespace.h`](https://github.com/torvalds/linux/blob/master/include/net/net_namespace.h#L61).
+
+The
 
 ```c
 struct netns_nf {
-
+.
+	struct nf_hook_entries __rcu *hooks_ipv4[NF_INET_NUMHOOKS];
+	struct nf_hook_entries __rcu *hooks_ipv6[NF_INET_NUMHOOKS];
+.
+#if IS_ENABLED(CONFIG_NF_DEFRAG_IPV4)
+	unsigned int defrag_ipv4_users;
+#endif
+#if IS_ENABLED(CONFIG_NF_DEFRAG_IPV6)
+	unsigned int defrag_ipv6_users;
+#endif
 }
 ```
-Figure X. TODO: The nf_hook code takes the hooks from the `nf` variable and loops over them. It's not clear
-if there is a single `nf` that is shared by every interface or if each interface has a separate copy
-with hooks that are unique to it...
+Figure 5. Netfilter network namespace stores a set of hooks that are added to the namespace
+for processing packets. 
 
-I don't currently know exactly how this works with the rest of the kernel, routing, etc., but I've seent
-the network used throughout the `skb` lifetime, so I'm including it. Unforunately, there is limited documentation
-on what the fields mean, so I'm going to have to figure that out as I go. In any case, I know that
-`ipv4` also has a `rules_ops` field which is used by the routing code for policy-routing decisions. I also
-know that the `nexthop` field is used for routing. The other fields I am including because I have
-a hunch they are used at some point. Anyway, the `rules_ops` is a type of `struct fib_rules_ops`.
+The `Netfitler` hooks, `hooks_ipv4` and `hooks_ipv6` are called when Netfilter
+is envoked. The details of this are covered later when we walk through the
+first time Netfilter is called. The `ipv4` variable also has a `rules_ops`
+field which is used by the routing code for policy-routing decisions. The
+`nexthop` field is used for routing. 
 
 ```c
 struct netns_ipv4 {
@@ -241,7 +254,7 @@ struct netns_ipv4 {
 #endif
 .
 ```
-Figure X. Routing related data structures for IPv4 routing. Located at [`include/net/netns/ipv4.h`](https://github.com/torvalds/linux/blob/master/include/net/netns/ipv4.h#L50).
+Figure 6. Routing related data structures for IPv4 routing. Located at [`include/net/netns/ipv4.h`](https://github.com/torvalds/linux/blob/master/include/net/netns/ipv4.h#L50).
 
 When Linux is configured to support multiple routing tables, the `netns_ipv4`
 struct includes at least `fib_main` representing the `MAIN` fib table and
@@ -262,7 +275,7 @@ enum rt_class_t {
 	RT_TABLE_MAX=0xFFFFFFFF
 };
 ```
-Figure X. [Identifiers for routing tables.](https://elixir.bootlin.com/linux/v6.14.4/source/include/uapi/linux/rtnetlink.h#L355)
+Figure 7. Identifiers for routing tables. Located at [`include/uapi/linux/rtnetlink.h`](https://elixir.bootlin.com/linux/v6.14.4/source/include/uapi/linux/rtnetlink.h#L355)
 
 ### Routing Tables
 
@@ -298,7 +311,7 @@ struct fib_table {
 .
 };
 ```
-Figure X. Defintion of a FIB table in Linux. Located at [`include/net/ip_fib.h`](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L257).
+Figure 8. Defintion of a FIB table in Linux. Located at [`include/net/ip_fib.h`](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L257).
 
 Routing rules are represented by the `fib_rules_ops` data structure. This is a
 structure that organizes a number of callback functions that are called for
@@ -318,7 +331,7 @@ struct fib_rules_ops {
 .
 }
 ```
-Figure X. Data structure representing actions to be made during routing
+Figure 9. Data structure representing actions to be made during routing
 decisions. Located at
 [`include/net/fib_rules.h`](https://github.com/torvalds/linux/blob/master/include/net/fib_rules.h#L64).
 
@@ -337,14 +350,14 @@ struct fib_rule {
 .
 }
 ```
-Figure X. Defintion of a FIB routing rule. Located in [`include/net/fib_rules.h`](https://github.com/torvalds/linux/blob/master/include/net/fib_rules.h#L20).
+Figure 10. Defintion of a FIB routing rule. Located in [`include/net/fib_rules.h`](https://github.com/torvalds/linux/blob/master/include/net/fib_rules.h#L20).
 
 Take the following routing rule as an example:
 
 ```bash
 11000:	from all iif lo oif wlan0 uidrange 0-0 lookup wlan0 
 ```
-Figure X. Example routing rule.
+Figure 11. Example routing rule.
 
 This rule states that any incoming packets (`from all`) that are locally
 generated ('iff lo`) and destined for the wifi interface (`oif wlan0`) with the
@@ -377,7 +390,7 @@ lynx:/ $ ip route show table 1046
 default via 10.0.0.1 dev wlan0 proto static 
 10.0.0.0/24 dev wlan0 proto static scope link 
 ```
-Figure X. `wlan0` routing table is 1046 and accompanying routes.
+Figure 12. `wlan0` routing table is 1046 and accompanying routes.
 
 
 ```bash
@@ -400,7 +413,7 @@ lynx:/ $ ip rule | grep 1050
 17000:	from all iif lo oif tun1 uidrange 10309-20307 lookup 1050 
 17000:	from all iif lo oif tun1 uidrange 20309-99999 lookup 1050 
 ```
-Figure X. Policy-routing for `tun1` and its associated table `1050`.
+Figure 13. Policy-routing for `tun1` and its associated table `1050`.
 
 ```bash
 lynx:/ $ ip route show table 1050
@@ -409,7 +422,7 @@ lynx:/ $ ip route show table 1050
 .
 128.0.0.0/1 dev tun1 proto static scope link
 ```
-Figure X. Routes associated with `tun1` routing table.
+Figure 14. Routes associated with `tun1` routing table.
 
 These rules were taken from my rooted Pixel7a Android device with a VPN
 installed (for more info on how to root a Pixel7a, check out my other post
@@ -474,7 +487,7 @@ lynx:/ # iptables -t mangle -S -v
 -A wakeupctrl_mangle_INPUT -i rmnet2 -m mark --mark 0x80000000/0x80000000 -m limit --limit 10/sec -c 0 0 -j NFLOG --nflog-prefix "445787328525:rmnet2" --nflog-group 3 --nflog-threshold 8
 -A wakeupctrl_mangle_INPUT -i tun1 -m mark --mark 0x80000000/0x80000000 -m limit --limit 10/sec -c 0 0 -j NFLOG --nflog-prefix "450082295821:tun1" --nflog-group 3 --nflog-threshold 8
 ```
-Figure X. Netfilter rules to mark packets.
+Figure 15. Netfilter rules to mark packets.
 
 The `mangle` table is the only table with meaingful rules, so I didn't include
 the others. The `mangle` table looks like:
@@ -546,7 +559,7 @@ Chain wakeupctrl_mangle_INPUT (1 references)
     0     0 NFLOG      all  --  rmnet2 *       0.0.0.0/0            0.0.0.0/0            mark match 0x80000000/0x80000000 limit: avg 10/sec burst 5 nflog-prefix "445787328525:rmnet2" nflog-group 3 nflog-threshold 8
     0     0 NFLOG      all  --  tun1   *       0.0.0.0/0            0.0.0.0/0            mark match 0x80000000/0x80000000 limit: avg 10/sec burst 5 nflog-prefix "450082295821:tun1" nflog-group 3 nflog-threshold 8
 ```
-Figure X. Netfilter tables.
+Figure 16. Netfilter tables.
 
 The routing rules, Netfilter, and socket-supported `fwmark` marks allow Android
 to route packets between interfaces in the face of the user constantly
@@ -585,7 +598,7 @@ chain. The first set of hooks related to packet reception are `NF_INET_PRE_ROUTI
                                 .hook   = NF_INET_FORWARD,
                         },
 ```
-Figure X. `iptables` code for adding hooks on the various recieve paths of the `mangle` table. Located at [`iptables/iptables/nft.c`](https://git.netfilter.org/iptables).
+Figure 17. `iptables` code for adding hooks on the various recieve paths of the `mangle` table. Located at [`iptables/iptables/nft.c`](https://git.netfilter.org/iptables).
 
 ## Data Structure Representation in this Post
 
@@ -637,7 +650,7 @@ struct fib_rules_ops rules_ops_tun1 = {
     {from:all, iif:lo, oif:tun1, uidrange:0-10307, action: lookup fib_main_tun1}
 }
 ```
-Figure X. Routing data structure used for this post.
+Figure 18. Routing data structure used for this post.
 
 # Packet Reception
 
@@ -703,7 +716,7 @@ static int emac_napi_rtx(struct napi_struct *napi, int budget)
 }
 
 ```
-Figure X. Packet reception code `emac_napi_rtx` in [`drivers/net/qualcomm/emac/emac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac.c#L96).
+Figure 19. Packet reception code `emac_napi_rtx` in [`drivers/net/qualcomm/emac/emac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac.c#L96).
 
 This is just a wrapper for `emac_mac_rx_process`, which does the actual packet
 processing and calls, e.g., the `af_inet` (TCP/IP) stack.  Before this happens
@@ -741,7 +754,7 @@ void emac_mac_rx_process(struct emac_adapter *adpt, struct emac_rx_queue *rx_q,
 .
 }
 ```
-Figure X. Code to pull a packet from the Qualcomm `rx` queue and call, e.g.,
+Figure 20. Code to pull a packet from the Qualcomm `rx` queue and call, e.g.,
 `af_inet`, in
 [`drivers/net/qualcomm/emac-emac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac-mac.c#L1087).
 
@@ -753,7 +766,7 @@ same stream before delivering them to the network stack.
 ```bash
 struct sk_buff skbAtk = {dev:devWlan0, sk:None,_nfct:0, pkt_type=<UNKNOWN>, skb_iif=<UNKNOWN MAYBE 2>, secmark=0, mark=0}
 ```
-Figure X. `skbAtk` after the call to `emac_mac_rx_process
+Figure 21. `skbAtk` after the call to `emac_mac_rx_process
 
 ```c
 /* Push the received skb to upper layers */
@@ -771,7 +784,7 @@ static void emac_receive_skb(struct emac_rx_queue *rx_q,
 	napi_gro_receive(&rx_q->napi, skb);
 }
 ```
-Figure X. Qualcomm card delivering `skb` to upper layers _via_ NAPI. In [`drivers/net/qualcomm/emac/emac-mac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac-mac.c#L1071).
+Figure 22. Qualcomm card delivering `skb` to upper layers _via_ NAPI. In [`drivers/net/qualcomm/emac/emac-mac.c`](https://github.com/torvalds/linux/blob/master/drivers/net/ethernet/qualcomm/emac/emac-mac.c#L1071).
 
 Like NAPI, GRO (Generic Receiver Offload) is a technique the Linux kernel uses
 to aggregate groups of packets for the same stream and pass them up the network
@@ -799,7 +812,7 @@ gro_result_t gro_receive_skb(struct gro_node *gro, struct sk_buff *skb)
 	return ret;
 }
 ```
-Figure X. GRO receive function calls `dev_gro_receive` to pass the `skb` up the network
+Figure 23. GRO receive function calls `dev_gro_receive` to pass the `skb` up the network
 stack for packet aggregation. More details can be found at [`net/core/gro.c`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L622).
 
 
@@ -819,7 +832,7 @@ static enum gro_result dev_gro_receive(struct gro_node *gro,
 .
 }
 ```
-Figure. GRO calling the `af_inet` packet reception code `inet_gro_receive` for IPv4 or `ipv6_gro_receive` for IPv6. 
+Figure 24. GRO calling the `af_inet` packet reception code `inet_gro_receive` for IPv4 or `ipv6_gro_receive` for IPv6. 
 More details at [`net/core/gro.c#L460`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L460).
 
 The `gro_*` functions for IP and TCP/UDP are used to aggregate fragmented (and
@@ -839,7 +852,7 @@ static gro_result_t gro_skb_finish(struct gro_node *gro, struct sk_buff *skb,
 .
 }
 ```
-Figure. `gro_skb_finish` is called once GRO has aggregated a stream of packets. Details at [`net/core/gro.c`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L596).
+Figure 25. `gro_skb_finish` is called once GRO has aggregated a stream of packets. Details at [`net/core/gro.c`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L596).
 
 ```c
 /* Queue one GRO_NORMAL SKB up for list processing. If batch size exceeded,
@@ -854,7 +867,7 @@ static inline void gro_normal_one(struct gro_node *gro, struct sk_buff *skb,
 		gro_normal_list(gro);
 }
 ```
-Figure. `gro_normal_one` is used to pass the aggregated packets up the stack. Details at [`include/net/gro.h`](https://github.com/torvalds/linux/blob/master/include/net/gro.h#L540).
+Figure 26. `gro_normal_one` is used to pass the aggregated packets up the stack. Details at [`include/net/gro.h`](https://github.com/torvalds/linux/blob/master/include/net/gro.h#L540).
 
 More boilerplate and indirection are called, but we are finally getting to something that resembles `ip_rcv`.
 
@@ -886,7 +899,7 @@ void netif_receive_skb_list_internal(struct list_head *head)
 	rcu_read_unlock();
 }
 ```
-Figure. Device receive function interface. This function recieves a list of `skb`s from GRO
+Figure 27. Device receive function interface. This function recieves a list of `skb`s from GRO
 and passes them up the network stack. Located in [`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L6091)
 
 
@@ -906,7 +919,7 @@ static void __netif_receive_skb_list(struct list_head *head)
 .
 }
 ```
-Figure X. More indirection to get to Network stack. Mostly book keeping for
+Figure 28. More indirection to get to Network stack. Mostly book keeping for
 memory and to process the list of GRO packets. Located in
 [`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L6005).
 
@@ -932,7 +945,7 @@ static void __netif_receive_skb_list_core(struct list_head *head, bool pfmemallo
 .
 }
 ```
-Figure X. Located in [`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L5939)
+Figure 29. Located in [`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L5939)
 
 Finally, the `__netif_receive_skb_list_ptype` calls `ip_rcv` (or `ip_list_rcv`)
 for `skbAtk`.  Up to this point, only a few fields in `skbAtk` have change. The
@@ -962,7 +975,7 @@ static inline void __netif_receive_skb_list_ptype(struct list_head *head,
 		}
 }
 ```
-Figure X. Located at [`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L5919) 
+Figure 30. Located at [`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L5919) 
 
 At last, we have reach the final layer of indirection between the generic
 packet reception code and the IP stack. In if clause, the `INDIRECT_CALL_INET`
@@ -998,7 +1011,7 @@ struct tun_struct {
 	struct net_device	*dev;
 
 ```
-Figure. `tun_struct` representing a tun device.
+Figure 31. `tun_struct` representing a tun device.
 
 
 
@@ -1012,7 +1025,7 @@ static int __init tun_init(void)
 	ret = rtnl_link_register(&tun_link_ops);
 .
 ```
-Figure. tun registration routine.
+Figure 32. tun registration routine.
 
 
 ```c
@@ -1024,14 +1037,14 @@ static const struct proto_ops tun_socket_ops = {
 };
 
 ```
-Figure. `tun_socket_ops` callbacks used to receive packets. Defined in [`driver/net/tun.c`](https://github.com/torvalds/linux/blob/master/drivers/net/tun.c#L955).
+Figure 33. `tun_socket_ops` callbacks used to receive packets. Defined in [`driver/net/tun.c`](https://github.com/torvalds/linux/blob/master/drivers/net/tun.c#L955).
 
 ```c
 static int tun_recvmsg(struct socket *sock, struct msghdr *m, size_t total_len,
 		       int flags)
 {
 ```
-Figure. Main receive function for tunnel device. Defined in [`driver/net/tun.c`](https://github.com/torvalds/linux/blob/master/drivers/net/tun.c#L2538)
+Figure 34. Main receive function for tunnel device. Defined in [`driver/net/tun.c`](https://github.com/torvalds/linux/blob/master/drivers/net/tun.c#L2538)
 
 ## Network Layer
 
@@ -1058,7 +1071,7 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt,
 		       ip_rcv_finish);
 }
 ```
-Figure X. The receive routine registered with the kernel. Details at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#558)
+Figure 35. The receive routine registered with the kernel. Details at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#558)
 
 The `ip_rcv_core` function is used to get the `skb` ready for processing
 further up the network stack. This includes removing padding that may have been
@@ -1079,10 +1092,10 @@ static struct sk_buff *ip_rcv_core(struct sk_buff *skb, struct net *net)
 .
 }
 ```
-Figure X. `ip_rcv_core` is mainly used for book keeping and sanity checking the packet. Details at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L454)
+Figure 36. `ip_rcv_core` is mainly used for book keeping and sanity checking the packet. Details at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L454)
 
-After the `skb` is confirmed to be legit and the appropriate book keeping has
-been done (e.g., `transport_header` pointer for the `skb` has been updated),
+After `skbAtk` is confirmed to be legit and the appropriate book keeping has
+been done (e.g., `transport_header` pointer for `skbAtk` has been updated),
 `ip_rcv` calls `ip_rcv_finish` as a function to be called after the rules in
 `Netfilter`'s `PREROUTING` hook have been executed. From what I can tell,
 unlike the classic `Netfilter` diagram that shows the `PREROUTING` chains being
@@ -1102,11 +1115,12 @@ NF_HOOK(uint8_t pf, unsigned int hook, struct net *net, struct sock *sk, struct 
 }
 
 ```
-Figre X. Located at [`include/linux/netfilter.h`](https://github.com/torvalds/linux/blob/master/include/linux/netfilter.h#L307).
+Figure 37. Located at [`include/linux/netfilter.h`](https://github.com/torvalds/linux/blob/master/include/linux/netfilter.h#L307).
 
-As always `NF_HOOK` is a wrapper for the underlying `nf_hook` function that
+`NF_HOOK` wraps for the underlying `nf_hook` function that
 handles the return codes for the Netfilter hooks and ultimately calls
-`ip_rcv_finish` if the packet is allowed to `PASS`.
+`ip_rcv_finish` if the packet is allowed to `PASS`. For any other return code, 
+the hook consumes the `skb`
 
 Most of the parameters to `nf_hook` are self explanetory. First, `pf` which is
 `AF_INET` in the case of IP. The `PRE_ROUTING` hook indicates that packet
@@ -1120,11 +1134,9 @@ The `indev` is the Qualcomm device that received the packet while the `outdev` i
 currently `NULL`. This will be assigned later when the routing table is looked up.
 
 #### `Questions`
-1. Where and when is the device's network name space `dev` initialized.
-2. MAYBE ANSWERED: What are the values of `indev` and `outdev`? 
+1. Where and when is the device's network name space `dev` initialized?
 
 ```c
-
 /**
  *	nf_hook - call a netfilter hook
  *
@@ -1157,7 +1169,7 @@ static inline int nf_hook(u_int8_t pf, unsigned int hook, struct net *net,
 	return ret;
 }
 ```
-Figure. Netfilter wrapper function to determine which hook to execute. Details at [`include/linux/netfilter.h`](https://github.com/torvalds/linux/blob/master/include/linux/netfilter.h#L223).
+Figure 38. Netfilter wrapper function to determine which hook to execute. Details at [`include/linux/netfilter.h`](https://github.com/torvalds/linux/blob/master/include/linux/netfilter.h#L223).
 
 The `nf_hook_state_init` function just takes all the parameters passed to it
 and assigns them to members of the `nf_hook_state` struct.  The real work is
@@ -1180,7 +1192,7 @@ int nf_hook_slow(struct sk_buff *skb, struct nf_hook_state *state,
 			break;
 }
 ```
-Figure X. Routine to loop through Netfilter rules. Details at [`net/netfilter/core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/core.c#L617).
+Figure 39. Routine to loop through Netfilter rules. Details at [`net/netfilter/core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/core.c#L617).
 
 Recall that Netfilter initializes its subsystem early. This includes the
 `conntrack` module, which is always registered, and `SELinux` in the case of
@@ -1199,9 +1211,13 @@ static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 	ret = ip_rcv_finish_core(net, skb, dev, NULL);
 .
 ```
-Figure X. The finishing function called with Netfilter hook code, at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L433).
+Figure 40. The function called by the Netfilter hook code, `okfn` when the
+packet is allowed the "PASS". Located at
+[`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L433).
 
-
+The `ip_rcv_finish` function is responsible for checking whether the "ingress
+device is enslaved to an L3 master", otherwise, it calls the actual routing
+code, `ip_rcv_finish_core`.
 
 ```c
 static int ip_rcv_finish_core(struct net *net,
@@ -1234,8 +1250,12 @@ static int ip_rcv_finish_core(struct net *net,
 
 
 ```
-Figure. Located at [`net/ipv4/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L317).
+Figure 41. Located at [`net/ipv4/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L317).
 
+The `ip_rcv_finish_core` function calls into the routing code to set up the
+route for `skbAtk`, either to be consumed by the higher layer protocol or
+forwarded. In our case, `skbAtk` should take the forwarding path because
+it was received by `wlan0`.
 
 ```c
 enum skb_drop_reason ip_route_input_noref(struct sk_buff *skb, __be32 daddr,
@@ -1254,13 +1274,19 @@ enum skb_drop_reason ip_route_input_noref(struct sk_buff *skb, __be32 daddr,
 EXPORT_SYMBOL(ip_route_input_noref);
 
 ```
-Figure. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2526).
+Figure 42. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2526).
+
+`ip_route_input_noref` stores the results of the route lookup in the `struct fib_result res` variable.
+It then calls `ip_route_input_rcu` after acquiring an rcu read lock (`rcu_read_lock`). Functions
+throughout the kernel have the string `_rcu` to indicate that the caller holds an rcv lock for during
+the call. `ip_route_input_rcu` takes `skbAtk` the addresses, device `dev`, and a pointer the the
+routing results `res` where the results are stored.
 
 ```c
 // TODO, add in_route_input_rcu code
 
 ```
-Figure. `ip_route_input_rcu`. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2474).
+Figure 43. `ip_route_input_rcu`. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2474).
 
 ```c
 /*
@@ -1323,7 +1349,7 @@ make_route:
 				  flkeys);
 }
 ```
-Figure `ip_route_input_slow` in [route.c](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2908)
+Figure 44. `ip_route_input_slow` in [route.c](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2908)
 
 When `ip_route_input_slow` runs, it retrives the `in_device`, and the associated `net` (network)
 with the incoming `net_device`. `in_device` is a pointer to the device that
@@ -1374,7 +1400,7 @@ out:
 	return err;
 }
 ```
-Figure X. `fig_lookup` for multiple tables [374](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L374).
+Figure 45. `fig_lookup` for multiple tables [374](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L374).
 
 
 When multiple tables are defined, the routing code calls into `__fib_lookup` in
@@ -1390,7 +1416,7 @@ int __fib_lookup(struct net *net, struct flowi4 *flp,
 }
 
 ```
-Figure X. Located at [``](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L83).
+Figure 46. Located at [``](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L83).
 
 
 ```c
@@ -1413,7 +1439,7 @@ jumped:
 
 }
 ```
-Figure X. in `fig_rules.c` Line [108](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108)
+Figure 47. in `fig_rules.c` Line [108](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108)
 
 
 ```c
@@ -1440,7 +1466,7 @@ static int fib_rule_match(struct fib_rule *rule, struct fib_rules_ops *ops,
 	return (rule->flags & FIB_RULE_INVERT) ? !ret : ret;
 }
 ```
-Figure. Routine for policy-based routing decisions. Located at [`net/core/fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/core/fib_rules.c#L278).
+Figure 48. Routine for policy-based routing decisions. Located at [`net/core/fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/core/fib_rules.c#L278).
 
 The `fib_rule_match` function is the primary function for making policy-routing decisions. Various 
 pieces of information from the `flowi` (ie., `flow_keys`) object are compared against the `struct fib_rule rule`.
@@ -1471,7 +1497,7 @@ INDIRECT_CALLABLE_SCOPE int fib4_rule_action(struct fib_rule *rule,
 	return err;
 }
 ```
-Figure. Located at [`net/ipv4/fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L110).
+Figure 49. Located at [`net/ipv4/fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L110).
 
 The routing table for the specific network is found found by calling to `fib_get_table` and passing it `rule->fr_net` and the
 table id.
@@ -1498,7 +1524,7 @@ struct fib_table *fib_get_table(struct net *net, u32 id)
 }
 #endif /* CONFIG_IP_MULTIPLE_TABLES */
 ```
-Figure. `fib_get_table` when Linux is configured to support multiple routing tables. Located at [``](https://github.com/torvalds/linux/blob/b1427432d3b656fac71b3f42824ff4aea3c9f93b/net/ipv4/fib_frontend.c#L111).
+Figure 50. `fib_get_table` when Linux is configured to support multiple routing tables. Located at [``](https://github.com/torvalds/linux/blob/b1427432d3b656fac71b3f42824ff4aea3c9f93b/net/ipv4/fib_frontend.c#L111).
 
 
 
@@ -1540,7 +1566,7 @@ full_check:
 				     itag);
 }
 ```
-Figure X. Source address validation for locally destined packets. Located at [`net/ipv4/fib_frontend.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_frontend.c#L428.).
+Figure 51. Source address validation for locally destined packets. Located at [`net/ipv4/fib_frontend.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_frontend.c#L428.).
 
 
 The validation is performed by `__fib_validate_source`.
@@ -1572,7 +1598,7 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 .
 }
 ```
-Figure X. Located at [`fib_frontend.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_frontend.c#L344).
+Figure 52. Located at [`fib_frontend.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_frontend.c#L344).
 
 
 `ip_mkroute_input` is called.
@@ -1596,7 +1622,7 @@ ip_mkroute_input(struct sk_buff *skb, struct fib_result *res,
 	return __mkroute_input(skb, res, in_dev, daddr, saddr, dscp);
 }
 ```
-Figure X. Call to `ip_mkroute_input` with the `fib_result` passed. Located at[`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2149).
+Figure 53. Call to `ip_mkroute_input` with the `fib_result` passed. Located at[`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2149).
 
 TODO: 
 
