@@ -393,8 +393,6 @@ lynx:/ $ ip rule | grep 1050
 ```
 Figure X. Policy-routing for `tun1` and its associated table `1050`.
 
-
-
 ```bash
 lynx:/ $ ip route show table 1050
 0.0.0.0/2 dev tun1 proto static scope link 
@@ -547,7 +545,38 @@ switching networks, IP addresses, and multiple interfaces of different types
 (i.e., tuntap, wireguard, mobile data, and Wifi). Notice that the default
 policies are fail-open (ACCEPT), so that weird packets will be routed, even if
 they are in an invalid state or, as William, Beau, and Jed discovered, fail
-source address validation
+source address validation.
+
+The important rules that add `fwmarks` to packets are configured in the
+`routectrl_mangle` chain. These hooks are added to the mangle table's `INPUT`
+chain. The first set of hooks related to packet reception are `NF_INET_PRE_ROUTING`,
+`NF_INET_LOCAL_IN` , and `NF_INET_FORWARD`.
+
+```c
+        [NFT_TABLE_MANGLE] = {
+                .name   = "mangle",
+                .type   = NFT_TABLE_MANGLE,
+                .chains = {
+                        {
+                                .name   = "PREROUTING",
+                                .type   = "filter",
+                                .prio   = -150, /* NF_IP_PRI_MANGLE */
+                                .hook   = NF_INET_PRE_ROUTING,
+                        },
+                        {
+                                .name   = "INPUT",
+                                .type   = "filter",
+                                .prio   = -150, /* NF_IP_PRI_MANGLE */
+                                .hook   = NF_INET_LOCAL_IN,
+                        },
+                        {
+                                .name   = "FORWARD",
+                                .type   = "filter",
+                                .prio   = -150, /* NF_IP_PRI_MANGLE */
+                                .hook   = NF_INET_FORWARD,
+                        },
+```
+Figure X. `iptables` code for adding hooks on the various recieve paths of the `mangle` table. Located at [`iptables/iptables/nft.c`](https://git.netfilter.org/iptables).
 
 ## Data Structure Representation in this Post
 
