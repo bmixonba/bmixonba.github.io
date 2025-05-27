@@ -1276,17 +1276,55 @@ EXPORT_SYMBOL(ip_route_input_noref);
 ```
 Figure 42. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2526).
 
-`ip_route_input_noref` stores the results of the route lookup in the `struct fib_result res` variable.
-It then calls `ip_route_input_rcu` after acquiring an rcu read lock (`rcu_read_lock`). Functions
-throughout the kernel have the string `_rcu` to indicate that the caller holds an rcv lock for during
-the call. `ip_route_input_rcu` takes `skbAtk` the addresses, device `dev`, and a pointer the the
-routing results `res` where the results are stored.
+`ip_route_input_noref` stores the results of the route lookup in the `struct
+fib_result res` variable. The `fib_result` data structure stores a reference
+to the outgoing device in the the `nhc->nhc_dev` field. 
 
 ```c
-// TODO, add in_route_input_rcu code
-
+struct fib_result {
+.
+	struct fib_nh_common	*nhc;
+	struct fib_info		*fi;
+	struct fib_table	*table;
+.
+}
 ```
-Figure 43. `ip_route_input_rcu`. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2474).
+Figure 43. Definition for `fib_result`. Located at [`include/net/ip_fib.h`](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L173).
+
+```c
+struct fib_nh_common {
+	struct net_device	*nhc_dev;
+	netdevice_tracker	nhc_dev_tracker;
+	int			nhc_oif;
+.
+	union {
+		__be32          ipv4;
+		struct in6_addr ipv6;
+	} nhc_gw;
+.
+```
+Figure 44. Data structure that stores a reference to the outgoing device in `nhc_dev`. Located at [`include/net/ip_fib.h`](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L83).
+
+
+`ip_route_input_noref` It then calls `ip_route_input_rcu` after acquiring an
+rcu read lock (`rcu_read_lock`). This function primarily handles the case when
+multicast routing, which I will not cover in detail, is compiled into the
+kernel. Functions throughout the kernel have the string `_rcu` to indicate that
+the caller holds an rcu lock for during the call. `ip_route_input_rcu` takes
+`skbAtk`, the addresses, device `dev`, and a pointer the the routing results
+`res` where the results are stored.
+
+```c
+/* called with rcu_read_lock held */
+static enum skb_drop_reason
+ip_route_input_rcu(struct sk_buff *skb, __be32 daddr, __be32 saddr,
+		   dscp_t dscp, struct net_device *dev,
+		   struct fib_result *res)
+{
+
+}
+```
+Figure 45. `ip_route_input_rcu`. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2474).
 
 ```c
 /*
@@ -1317,7 +1355,7 @@ ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 	 *	Now we are ready to route packet.
 	 */
 .
-	fl4.flowi4_mark = skb->mark;
+	fl4.flowi4_mark = skb->mark; // Currently 0
 
 	fl4.flowi4_uid = sock_net_uid(net, NULL);
 .
@@ -1349,21 +1387,21 @@ make_route:
 				  flkeys);
 }
 ```
-Figure 44. `ip_route_input_slow` in [route.c](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2908)
+Figure 46. `ip_route_input_slow` in [route.c](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2908)
 
-When `ip_route_input_slow` runs, it retrives the `in_device`, and the associated `net` (network)
-with the incoming `net_device`. `in_device` is a pointer to the device that
-received the packet, `net` is the network associated with the device (recall that in Linux, 
-multiple networks and associated routing tables can be defined). `ip_route_input_slow` uses
-a `flow_keys` object `flkeys` to look up the incoming route for the `skb`. The `flkeys` 
+When `ip_route_input_slow` runs, it retrives the `in_device`, and the
+associated `net` (`net_init`, I think) with the incoming `net_device`.
+`in_device` is a pointer to the device that received the packet, `net` is the
+network associated with the device. `ip_route_input_slow` uses a `flow_keys`
+object `flkeys` to look up the incoming route for the `skb`. The `flkeys`
 contains the socket mark `mark` and the `uid` of the associated `net` object.
+For `skbAtk`, `skbAtk->mark == 0x0` because there no `PREROUTING` hooks have
+been registered. `uid` be `net` the kernel's uid (0), because this is an
+unsoliciated incoming packet and is not associated with any sockets.
 
-Question:
-1. When is the `skb->mark` field set on the incoming path?
-2. 
-
-The call to `fib_lookup` finds the correct route for the incoming packet. `fib_lookup` has two definitions, one for
-when the kernel supports only one routing table, and one for when multiple tables are available.
+The call to `fib_lookup` finds the correct route for the incoming packet.
+`fib_lookup` has two definitions, one for when the kernel supports only one
+routing table, and one for when multiple tables are available.
 
 ```c
 static inline int fib_lookup(struct net *net, struct flowi4 *flp,
@@ -1400,11 +1438,13 @@ out:
 	return err;
 }
 ```
-Figure 45. `fig_lookup` for multiple tables [374](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L374).
-
+Figure 47. `fig_lookup` for multiple tables [374](https://github.com/torvalds/linux/blob/master/include/net/ip_fib.h#L374).
 
 When multiple tables are defined, the routing code calls into `__fib_lookup` in
 [`fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108).
+Because I am assuming the policy-routing rules for Android,
+the `net->ipv4.fib_has_custom_rules` predicate evaluates to true and `__fib_lookup`
+is called.
 
 ```c
 int __fib_lookup(struct net *net, struct flowi4 *flp,
@@ -1416,8 +1456,15 @@ int __fib_lookup(struct net *net, struct flowi4 *flp,
 }
 
 ```
-Figure 46. Located at [``](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L83).
+Figure 48. Located at [`net/ipv4/fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L83).
 
+`__fib_lookup` handles the case when there is an L3 master controlling
+the device. Because this isn't the case, `fib_rules_lookup` is called
+along with the `ipv4.rules_ops` which will be `rules_ops_wlan0` since 
+`skbAtk` came in on `wlan0`.
+
+`fib_rules_lookup` loops through each of the `fib_rules_ops` and 
+checks whether any of them patch the `fl` field.
 
 ```c
 
@@ -1439,8 +1486,16 @@ jumped:
 
 }
 ```
-Figure 47. in `fig_rules.c` Line [108](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108)
+Figure 49. in `fig_rules.c` Line [108](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108)
 
+The `fib_rule_match` function is the primary function for making policy-routing
+decisions. Various pieces of information from the `flowi` (ie., `flow_keys`)
+object are compared against the `struct fib_rule rule`. In the current case
+`fl->flowi_mark = skb->mark == 0x0` because it did not receive a mark from
+Netfilter. There is also no `tun_id`, because the packet was not received on
+a kernel-defined tunnel. The only match that will occur for `wlan0` is related
+to the uid `fl->flowi_uid==skb->dev->net->user_ns->uid=0`, so the call to
+`fib4_rule_match` occurs.
 
 ```c
 static int fib_rule_match(struct fib_rule *rule, struct fib_rules_ops *ops,
@@ -1462,17 +1517,31 @@ static int fib_rule_match(struct fib_rule *rule, struct fib_rules_ops *ops,
 	if (uid_lt(fl->flowi_uid, rule->uid_range.start) ||
 	    uid_gt(fl->flowi_uid, rule->uid_range.end))
 		goto out;
-.
+	ret = INDIRECT_CALL_MT(ops->match,
+			       fib6_rule_match,
+			       fib4_rule_match,
+			       rule, fl, flags);
+out:
 	return (rule->flags & FIB_RULE_INVERT) ? !ret : ret;
 }
 ```
-Figure 48. Routine for policy-based routing decisions. Located at [`net/core/fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/core/fib_rules.c#L278).
+Figure 50. Routine for policy-based routing decisions. Located at [`net/core/fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/core/fib_rules.c#L278).
 
-The `fib_rule_match` function is the primary function for making policy-routing decisions. Various 
-pieces of information from the `flowi` (ie., `flow_keys`) object are compared against the `struct fib_rule rule`.
-In the case of VPNs in Android, XXX.
+```c
+INDIRECT_CALLABLE_SCOPE int fib4_rule_match(struct fib_rule *rule,
+					    struct flowi *fl, int flags)
+{
+	struct fib4_rule *r = (struct fib4_rule *) rule;
+	struct flowi4 *fl4 = &fl->u.ip4;
 
+```
+Figure 51. Function called when a routing rule matches. Located at [`net/ipv4/fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L179).
 
+`fib4_rule_match` is responsible for handling `dscp` and port matches, assuming
+they are configured for the routes. If the ports are configured in the routing
+rule but don't match, then the function returns 0, otherwise, the function
+returns 1, indicating a rule match. This propogates back to if statement
+in `fib_rules_lookup` and evaluates to 0, so that `fib4_rule_action` is called.
 
 ```c
 INDIRECT_CALLABLE_SCOPE int fib4_rule_action(struct fib_rule *rule,
@@ -1497,7 +1566,7 @@ INDIRECT_CALLABLE_SCOPE int fib4_rule_action(struct fib_rule *rule,
 	return err;
 }
 ```
-Figure 49. Located at [`net/ipv4/fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L110).
+Figure 51. Located at [`net/ipv4/fib_rules.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L110).
 
 The routing table for the specific network is found found by calling to `fib_get_table` and passing it `rule->fr_net` and the
 table id.
@@ -1524,7 +1593,7 @@ struct fib_table *fib_get_table(struct net *net, u32 id)
 }
 #endif /* CONFIG_IP_MULTIPLE_TABLES */
 ```
-Figure 50. `fib_get_table` when Linux is configured to support multiple routing tables. Located at [``](https://github.com/torvalds/linux/blob/b1427432d3b656fac71b3f42824ff4aea3c9f93b/net/ipv4/fib_frontend.c#L111).
+Figure 52. `fib_get_table` when Linux is configured to support multiple routing tables. Located at [``](https://github.com/torvalds/linux/blob/b1427432d3b656fac71b3f42824ff4aea3c9f93b/net/ipv4/fib_frontend.c#L111).
 
 
 
@@ -1566,7 +1635,7 @@ full_check:
 				     itag);
 }
 ```
-Figure 51. Source address validation for locally destined packets. Located at [`net/ipv4/fib_frontend.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_frontend.c#L428.).
+Figure 53. Source address validation for locally destined packets. Located at [`net/ipv4/fib_frontend.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_frontend.c#L428.).
 
 
 The validation is performed by `__fib_validate_source`.
@@ -1598,7 +1667,7 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 .
 }
 ```
-Figure 52. Located at [`fib_frontend.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_frontend.c#L344).
+Figure 54. Located at [`fib_frontend.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_frontend.c#L344).
 
 
 `ip_mkroute_input` is called.
@@ -1622,7 +1691,7 @@ ip_mkroute_input(struct sk_buff *skb, struct fib_result *res,
 	return __mkroute_input(skb, res, in_dev, daddr, saddr, dscp);
 }
 ```
-Figure 53. Call to `ip_mkroute_input` with the `fib_result` passed. Located at[`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2149).
+Figure 55. Call to `ip_mkroute_input` with the `fib_result` passed. Located at[`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2149).
 
 TODO: 
 
