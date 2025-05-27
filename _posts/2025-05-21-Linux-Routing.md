@@ -193,7 +193,7 @@ typedef struct {
 ```
 Figure 3. Definition of network namespace. Located at [`include/net/net_namespace.h`](https://github.com/torvalds/linux/blob/master/include/net/net_namespace.h#L397).
 
-The `struct net` field in each `net_device is, I think, just a reference to the
+The `struct net` field in each `net_device` is, I think, just a reference to the
 `init_net` network namespace defined in
 [`net/core/net_namespace.c`](https://github.com/torvalds/linux/blob/015a99fa76650e7d6efa3e36f20c0f5b346fe9ce/net/core/net_namespace.c#L48). Each network namespace contains a reference to the `user_namespace`, `user_ns`, for each "user" (process). This is used the enforce access control, such as checks to `CAP_SYS_ADMIN`. It also contains the routing rules (`rules_ops`), and IPv4 (and v6) related info in the `ipv4` struct, Netfilter, and conntrack related structures.
 
