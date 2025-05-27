@@ -215,6 +215,15 @@ struct net {
 ```
 Figure X. Definition of `struct net`. Located at [`include/net/net_namespace.h`](https://github.com/torvalds/linux/blob/master/include/net/net_namespace.h#L61).
 
+```c
+struct netns_nf {
+
+}
+```
+Figure X. TODO: The nf_hook code takes the hooks from the `nf` variable and loops over them. It's not clear
+if there is a single `nf` that is shared by every interface or if each interface has a separate copy
+with hooks that are unique to it...
+
 I don't currently know exactly how this works with the rest of the kernel, routing, etc., but I've seent
 the network used throughout the `skb` lifetime, so I'm including it. Unforunately, there is limited documentation
 on what the fields mean, so I'm going to have to figure that out as I go. In any case, I know that
@@ -970,7 +979,6 @@ or
 
 In the `Network Layer` section, I cover how the packet is delivered to the `af_inet` module.
 
-
 ### Tun device
 
 VPNs are typically configured with a `tun` device and are defined in
@@ -1052,10 +1060,11 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt,
 ```
 Figure X. The receive routine registered with the kernel. Details at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#558)
 
-The `ip_rcv_core` function is primarly used to get the `skb` ready for processing further up the network stack. This
-includes removing padding that may have been added by the receiving network card, making sure
-the header length and checksum are correct, and setting the transport layer header.
-
+The `ip_rcv_core` function is used to get the `skb` ready for processing
+further up the network stack. This includes removing padding that may have been
+added by the receiving network card, making sure the header length and checksum
+are correct, and setting the transport layer header pointer,
+`skb->transport_header`.
 
 ```c
 /*
@@ -1072,15 +1081,13 @@ static struct sk_buff *ip_rcv_core(struct sk_buff *skb, struct net *net)
 ```
 Figure X. `ip_rcv_core` is mainly used for book keeping and sanity checking the packet. Details at [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L454)
 
-
 After the `skb` is confirmed to be legit and the appropriate book keeping has
 been done (e.g., `transport_header` pointer for the `skb` has been updated),
 `ip_rcv` calls `ip_rcv_finish` as a function to be called after the rules in
 `Netfilter`'s `PREROUTING` hook have been executed. From what I can tell,
 unlike the classic `Netfilter` diagram that shows the `PREROUTING` chains being
 called in the Link Layer (Bridge layer in the diagram), it is actually called for the first
-time just before the IP layer works its magic.
-
+time just before the IP layer makes any routing decisions. 
 
 ```c
 static inline int
