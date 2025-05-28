@@ -1896,7 +1896,32 @@ struct fib_table *fib_get_table(struct net *net, u32 id)
 ```
 Figure 52. `fib_get_table` when Linux is configured to support multiple routing tables. Located at [``](https://github.com/torvalds/linux/blob/b1427432d3b656fac71b3f42824ff4aea3c9f93b/net/ipv4/fib_frontend.c#L111).
 
-
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+-------------ip_rcv_finish_core(net, skb, dev, NULL)
+--------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skb, daddr, saddr, dscp, dev, &res)
+----------------ip_route_input_slow(skb, daddr, saddr, dscp, dev, res)
+-----------------fib_lookup(net, &fl4, res, 0)
+------------------__fib_lookup(net, flp, res, flags)
+------------------fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg)
+-------------------fib_rule_match(rule, ops, fl, flags, arg)
+--------------------fib4_rule_action(rule, fl, flags, arg)
+---------------------fib_get_table(rule->fr_net, tb_id)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 Once the route has been stored in `fib_result`, the kernel checks whether the packet should be routed to this machine,
 `res-type==RTN_LOCAL`, fowarded, or dropped, because either a route doesn't exist or because the packet has a
@@ -1938,6 +1963,33 @@ full_check:
 ```
 Figure 53. Source address validation for locally destined packets. Located at [`net/ipv4/fib_frontend.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_frontend.c#L428.).
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+-------------ip_rcv_finish_core(net, skb, dev, NULL)
+--------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skb, daddr, saddr, dscp, dev, &res)
+----------------ip_route_input_slow(skb, daddr, saddr, dscp, dev, res)
+-----------------fib_lookup(net, &fl4, res, 0)
+------------------__fib_lookup(net, flp, res, flags)
+------------------fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg)
+-------------------fib_rule_match(rule, ops, fl, flags, arg)
+--------------------fib4_rule_action(rule, fl, flags, arg)
+---------------------fib_get_table(rule->fr_net, tb_id)
+----------------fib_validate_source_reason(skb, saddr, daddr, dscp,0, dev, in_dev, &itag)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 The validation is performed by `__fib_validate_source`.
 ```c
@@ -1970,6 +2022,35 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 ```
 Figure 54. Located at [`fib_frontend.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_frontend.c#L344).
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+-------------ip_rcv_finish_core(net, skb, dev, NULL)
+--------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skb, daddr, saddr, dscp, dev, &res)
+----------------ip_route_input_slow(skb, daddr, saddr, dscp, dev, res)
+-----------------fib_lookup(net, &fl4, res, 0)
+------------------__fib_lookup(net, flp, res, flags)
+------------------fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg)
+-------------------fib_rule_match(rule, ops, fl, flags, arg)
+--------------------fib4_rule_action(rule, fl, flags, arg)
+---------------------fib_get_table(rule->fr_net, tb_id)
+----------------fib_validate_source_reason(skb, saddr, daddr, dscp,0, dev, in_dev, &itag)
+ -----------------__fib_validate_source(skb, src, dst, dscp, oif, dev, r, idev,itag)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 
 `ip_mkroute_input` is called.
 ```c
@@ -1993,6 +2074,36 @@ ip_mkroute_input(struct sk_buff *skb, struct fib_result *res,
 }
 ```
 Figure 55. Call to `ip_mkroute_input` with the `fib_result` passed. Located at[`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2149).
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+-------------ip_rcv_finish_core(net, skb, dev, NULL)
+--------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skb, daddr, saddr, dscp, dev, &res)
+----------------ip_route_input_slow(skb, daddr, saddr, dscp, dev, res)
+-----------------fib_lookup(net, &fl4, res, 0)
+------------------__fib_lookup(net, flp, res, flags)
+------------------fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg)
+-------------------fib_rule_match(rule, ops, fl, flags, arg)
+--------------------fib4_rule_action(rule, fl, flags, arg)
+---------------------fib_get_table(rule->fr_net, tb_id)
+----------------fib_validate_source_reason(skb, saddr, daddr, dscp,0, dev, in_dev, &itag)
+ -----------------__fib_validate_source(skb, src, dst, dscp, oif, dev, r, idev,itag)
+-----------------ip_mkroute_input(skb, res, in_dev, daddr, saddr, dscp,flkeys)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 TODO: 
 
@@ -2024,6 +2135,37 @@ cleanup:
 ```
 Figure X. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L1797).
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+-------------ip_rcv_finish_core(net, skb, dev, NULL)
+--------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skb, daddr, saddr, dscp, dev, &res)
+----------------ip_route_input_slow(skb, daddr, saddr, dscp, dev, res)
+-----------------fib_lookup(net, &fl4, res, 0)
+------------------__fib_lookup(net, flp, res, flags)
+------------------fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg)
+-------------------fib_rule_match(rule, ops, fl, flags, arg)
+--------------------fib4_rule_action(rule, fl, flags, arg)
+---------------------fib_get_table(rule->fr_net, tb_id)
+----------------fib_validate_source_reason(skb, saddr, daddr, dscp,0, dev, in_dev, &itag)
+-----------------__fib_validate_source(skb, src, dst, dscp, oif, dev, r, idev,itag)
+-----------------ip_mkroute_input(skb, res, in_dev, daddr, saddr, dscp,flkeys)
+------------------__mkroute_input(skb, res, in_dev, daddr, saddr, dscp)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 `TODO`
 1. Are classids defind in Android?
 
@@ -2041,7 +2183,40 @@ static inline int dst_input(struct sk_buff *skb)
 				  ip6_input, ip_local_deliver, skb);
 }
 ```
-Figre X. [net/dst.h](https://github.com/torvalds/linux/blob/master/include/net/dst.h#L467)
+Figure X. [net/dst.h](https://github.com/torvalds/linux/blob/master/include/net/dst.h#L467)
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skbAtk, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skbAtk)
+----gro_skb_finish(gro, skbAtk, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skbAtk, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skbAtk, skbAtk->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skbAtk)
+-------------ip_rcv_finish_core(net, skbAtk, dev, NULL)
+--------------ip_route_input_noref(skbAtk, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skbAtk, daddr, saddr, dscp, dev, &res)
+----------------ip_route_input_slow(skbAtk, daddr, saddr, dscp, dev, res)
+-----------------fib_lookup(net, &fl4, res, 0)
+------------------__fib_lookup(net, flp, res, flags)
+------------------fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg)
+-------------------fib_rule_match(rule, ops, fl, flags, arg)
+--------------------fib4_rule_action(rule, fl, flags, arg)
+---------------------fib_get_table(rule->fr_net, tb_id)
+----------------fib_validate_source_reason(skbAtk, saddr, daddr, dscp,0, dev, in_dev, &itag)
+-----------------__fib_validate_source(skbAtk, src, dst, dscp, oif, dev, r, idev,itag)
+-----------------ip_mkroute_input(skbAtk, res, in_dev, daddr, saddr, dscp,flkeys)
+------------------__mkroute_input(skbAtk, res, in_dev, daddr, saddr, dscp)
+-------------------dst_input(skbAtk)
+--------------------ip_local_deliver(skbAtk)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 
 ```c
@@ -2101,6 +2276,39 @@ static int ip_local_deliver_finish(struct net *net, struct sock *sk, struct sk_b
 ```
 Figure X. IP code that calls to TCP or UDP receive routines, or sends an ICMP message in [ip_input](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L317).
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skbAtk, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skbAtk)
+----gro_skb_finish(gro, skbAtk, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skbAtk, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skbAtk, skbAtk->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skbAtk)
+-------------ip_rcv_finish_core(net, skbAtk, dev, NULL)
+--------------ip_route_input_noref(skbAtk, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skbAtk, daddr, saddr, dscp, dev, &res)
+----------------ip_route_input_slow(skbAtk, daddr, saddr, dscp, dev, res)
+-----------------fib_lookup(net, &fl4, res, 0)
+------------------__fib_lookup(net, flp, res, flags)
+------------------fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg)
+-------------------fib_rule_match(rule, ops, fl, flags, arg)
+--------------------fib4_rule_action(rule, fl, flags, arg)
+---------------------fib_get_table(rule->fr_net, tb_id)
+----------------fib_validate_source_reason(skbAtk, saddr, daddr, dscp,0, dev, in_dev, &itag)
+-----------------__fib_validate_source(skbAtk, src, dst, dscp, oif, dev, r, idev,itag)
+-----------------ip_mkroute_input(skbAtk, res, in_dev, daddr, saddr, dscp,flkeys)
+------------------__mkroute_input(skbAtk, res, in_dev, daddr, saddr, dscp)
+-------------------dst_input(skbAtk)
+--------------------ip_local_deliver(skbAtk)
+---------------------
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 
 # Lifetime of a packet
