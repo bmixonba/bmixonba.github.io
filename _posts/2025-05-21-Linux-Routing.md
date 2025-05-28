@@ -725,6 +725,12 @@ checks are performed. For the Qualcomm driver, the generic receiption
 offloading (GRO) framework is used instead of calling the `ip_rcv` routine
 directly every time an packet is received.
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 ```c
 /* Process receive event */
 void emac_mac_rx_process(struct emac_adapter *adpt, struct emac_rx_queue *rx_q,
@@ -764,6 +770,14 @@ calls `napi_gro_receive`. GRO is resonsible for aggregating packets for the
 same stream before delivering them to the network stack. 
 
 ```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
+
+```bash
 struct sk_buff skbAtk = {dev:devWlan0, sk:None,_nfct:0, pkt_type=<UNKNOWN>, skb_iif=<UNKNOWN MAYBE 2>, secmark=0, mark=0}
 ```
 Figure 21. `skbAtk` after the call to `emac_mac_rx_process
@@ -796,6 +810,15 @@ The `napi_gro_receive` function is a wrapper that does bookkeeping before callin
 and includes calls to trace the flow of `skbAtk` through the system
 before calling `dev_gro_receive`.
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
+
 ```c
 gro_result_t gro_receive_skb(struct gro_node *gro, struct sk_buff *skb)
 {
@@ -815,6 +838,14 @@ gro_result_t gro_receive_skb(struct gro_node *gro, struct sk_buff *skb)
 Figure 23. GRO receive function calls `dev_gro_receive` to pass the `skb` up the network
 stack for packet aggregation. More details can be found at [`net/core/gro.c`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L622).
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 
 ```c
@@ -854,6 +885,17 @@ static gro_result_t gro_skb_finish(struct gro_node *gro, struct sk_buff *skb,
 ```
 Figure 25. `gro_skb_finish` is called once GRO has aggregated a stream of packets. Details at [`net/core/gro.c`](https://github.com/torvalds/linux/blob/master/net/core/gro.c#L596).
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
+
 ```c
 /* Queue one GRO_NORMAL SKB up for list processing. If batch size exceeded,
  * pass the whole batch up to the stack.
@@ -868,6 +910,17 @@ static inline void gro_normal_one(struct gro_node *gro, struct sk_buff *skb,
 }
 ```
 Figure 26. `gro_normal_one` is used to pass the aggregated packets up the stack. Details at [`include/net/gro.h`](https://github.com/torvalds/linux/blob/master/include/net/gro.h#L540).
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 More boilerplate and indirection are called, but we are finally getting to something that resembles `ip_rcv`.
 
@@ -887,6 +940,17 @@ static inline void gro_normal_list(struct gro_node *gro)
 The function `netif_receive_skb_list_internal` while boiler plate, is at least out of the GRO could
 and closer to an IP receive routine, which is what we need for packet routing.
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 ```c
 void netif_receive_skb_list_internal(struct list_head *head)
@@ -902,6 +966,18 @@ void netif_receive_skb_list_internal(struct list_head *head)
 Figure 27. Device receive function interface. This function recieves a list of `skb`s from GRO
 and passes them up the network stack. Located in [`net/core/dev.c`](https://github.com/torvalds/linux/blob/master/net/core/dev.c#L6091)
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 ```c
 static void __netif_receive_skb_list(struct list_head *head)
@@ -928,6 +1004,20 @@ sent up the network stack from GRO. This function organizes all of the packets o
 type into a single, homogeneous sublist and then passes it to 
 `__netif_receive_skb_list_ptype` to call the network layer receive handler for that specific `packet_type`.
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 ```c
 static void __netif_receive_skb_list_core(struct list_head *head, bool pfmemalloc)
 {
@@ -953,6 +1043,21 @@ for `skbAtk`.  Up to this point, only a few fields in `skbAtk` have change. The
 changed, but from what I can tell, they do not affect routing. Notably, neither
 the `sk` nor `mark` fields have been changed. As we will see, this happens
 in the network layer code.
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 ```c
 static inline void __netif_receive_skb_list_ptype(struct list_head *head,
@@ -990,7 +1095,24 @@ Otherwise, `pt_prev->func` is going to be either
 or
 [`ipv6_rcv`](https://github.com/torvalds/linux/blob/master/net/ipv6/ip6_input.c#L302).
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 In the `Network Layer` section, I cover how the packet is delivered to the `af_inet` module.
+
 
 ### Tun device
 
@@ -1215,9 +1337,28 @@ Figure 40. The function called by the Netfilter hook code, `okfn` when the
 packet is allowed the "PASS". Located at
 [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L433).
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 The `ip_rcv_finish` function is responsible for checking whether the "ingress
 device is enslaved to an L3 master", otherwise, it calls the actual routing
 code, `ip_rcv_finish_core`.
+
+
 
 ```c
 static int ip_rcv_finish_core(struct net *net,
@@ -1257,6 +1398,27 @@ route for `skbAtk`, either to be consumed by the higher layer protocol or
 forwarded. In our case, `skbAtk` should take the forwarding path because
 it was received by `wlan0`.
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+-------------ip_rcv_finish_core(net, skb, dev, NULL)
+--------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+--------------skb_rtable(skb)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
+
 ```c
 enum skb_drop_reason ip_route_input_noref(struct sk_buff *skb, __be32 daddr,
 					  __be32 saddr, dscp_t dscp,
@@ -1272,13 +1434,32 @@ enum skb_drop_reason ip_route_input_noref(struct sk_buff *skb, __be32 daddr,
 	return reason;
 }
 EXPORT_SYMBOL(ip_route_input_noref);
-
 ```
 Figure 42. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2526).
 
 `ip_route_input_noref` stores the results of the route lookup in the `struct
 fib_result res` variable. The `fib_result` data structure stores a reference
 to the outgoing device in the the `nhc->nhc_dev` field. 
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+-------------ip_rcv_finish_core(net, skb, dev, NULL)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
+
 
 ```c
 struct fib_result {
@@ -1321,7 +1502,8 @@ ip_route_input_rcu(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 		   dscp_t dscp, struct net_device *dev,
 		   struct fib_result *res)
 {
-
+.
+	return ip_route_input_slow(skb, daddr, saddr, dscp, dev, res);
 }
 ```
 Figure 45. `ip_route_input_rcu`. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2474).
