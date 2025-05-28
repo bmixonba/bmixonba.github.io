@@ -1339,6 +1339,274 @@ Figure 40. The function called by the Netfilter hook code, `okfn` when the
 packet is allowed the "PASS". Located at
 [`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L433).
 
+### `NF_INET_PRE_ROUTING` Path called
+
+Netfilter's Conntrack module is loaded early in the boot process and supports
+IPv4 and IPv6 in at the network layer.  In function registered with Netfilter
+support e.g., TCP and UDP, but there are explicit hooks for these protocols.
+Rather, they are called inside the hooks registered with Netfitler.  The hooks
+Conntrack registers two functions in the `PREROUTING` (i.e.,
+`NF_INET_PRE_ROUTING`) hook, `ipv4_conntrack_in` and `ipv6_conntrack_in`.  and
+registers a number of hooks
+
+```c
+static const struct nf_hook_ops ipv4_conntrack_ops[] = {
+	{
+		.hook		= ipv4_conntrack_in,
+		.pf		= NFPROTO_IPV4,
+		.hooknum	= NF_INET_PRE_ROUTING,
+		.priority	= NF_IP_PRI_CONNTRACK,
+	},
+```
+Figure X. Conntrack IPv4 PREROUTING hooks registered. Located at [`net/netfilter/nf_conntrack_proto.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_proto.c#L235).
+
+The `ipv4_conntrack_in` is a wrapper for `nf_conntrack_in`.
+```c
+static unsigned int ipv4_conntrack_in(void *priv,
+				      struct sk_buff *skb,
+				      const struct nf_hook_state *state)
+{
+	return nf_conntrack_in(skb, state);
+}
+```
+Figure X. Located at [`net/netfilter/nf_conntrack_proto.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_proto.c#L203).
+
+```c
+unsigned int
+nf_conntrack_in(struct sk_buff *skb, const struct nf_hook_state *state)
+{
+	enum ip_conntrack_info ctinfo;
+.
+	tmpl = nf_ct_get(skb, &ctinfo);
+.
+repeat:
+	ret = resolve_normal_ct(tmpl, skb, dataoff,
+				protonum, state);
+	if (ret < 0) {
+		/* Too stressed to deal. */
+		NF_CT_STAT_INC_ATOMIC(state->net, drop);
+		ret = NF_DROP;
+		goto out;
+	}
+
+	ct = nf_ct_get(skb, &ctinfo); // _nfct=0
+	if (!ct) {
+		/* Not valid part of a connection */
+		NF_CT_STAT_INC_ATOMIC(state->net, invalid);
+		ret = NF_ACCEPT;
+		goto out;
+	}
+	ret = nf_conntrack_handle_packet(ct, skb, dataoff, ctinfo, state);
+	if (ret <= 0) {
+		/* Invalid: inverse of the return code tells
+		 * the netfilter core what to do */
+		nf_ct_put(ct);
+		skb->_nfct = 0;
+		/* Special case: TCP tracker reports an attempt to reopen a
+		 * closed/aborted connection. We have to go back and create a
+		 * fresh conntrack.
+		 */
+		if (ret == -NF_REPEAT)
+			goto repeat;
+
+		NF_CT_STAT_INC_ATOMIC(state->net, invalid);
+		if (ret == NF_DROP)
+			NF_CT_STAT_INC_ATOMIC(state->net, drop);
+
+		ret = -ret;
+		goto out;
+	}
+
+	if (ctinfo == IP_CT_ESTABLISHED_REPLY &&
+	    !test_and_set_bit(IPS_SEEN_REPLY_BIT, &ct->status))
+		nf_conntrack_event_cache(IPCT_REPLY, ct);
+out:
+	if (tmpl)
+		nf_ct_put(tmpl);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(nf_conntrack_in);
+```
+Figure X. Located at [`net/netfilter/nf_conntrack_core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_core.c#L1998).
+
+`resolve_normal_ct` resolves the `skbAtk` to a conntrack tuple. 
+```c
+/* On success, returns 0, sets skb->_nfct | ctinfo */
+static int
+resolve_normal_ct(struct nf_conn *tmpl,
+		  struct sk_buff *skb,
+		  unsigned int dataoff,
+		  u_int8_t protonum,
+		  const struct nf_hook_state *state)
+{
+	const struct nf_conntrack_zone *zone;
+	struct nf_conntrack_tuple tuple;
+	struct nf_conntrack_tuple_hash *h;
+	enum ip_conntrack_info ctinfo;
+	struct nf_conntrack_zone tmp;
+	u32 hash, zone_id, rid;
+	struct nf_conn *ct;
+
+	if (!nf_ct_get_tuple(skb, skb_network_offset(skb),
+			     dataoff, state->pf, protonum, state->net,
+			     &tuple))
+		return 0;
+
+	/* look for tuple match */
+	// Client-side Attack: Return 0 for skbAtk
+	zone = nf_ct_zone_tmpl(tmpl, skb, &tmp); 
+	hash = hash_conntrack_raw(&tuple, zone_id, state->net);
+	// Client-side Attack: returns NULL==0 
+	h = __nf_conntrack_find_get(state->net, zone, &tuple, hash);
+
+	if (!h) {
+                // Client-side attack: Try REPLY direction. Search Fails 
+		rid = nf_ct_zone_id(zone, IP_CT_DIR_REPLY);
+		if (zone_id != rid) {
+			u32 tmp = hash_conntrack_raw(&tuple, rid, state->net);
+
+			h = __nf_conntrack_find_get(state->net, zone, &tuple, tmp);
+		}
+	}
+
+	// Client-side Attack: We have a new entry
+	if (!h) {
+		// Client-side Attack: We have a new entry
+		h = init_conntrack(state->net, tmpl, &tuple,
+				   skb, dataoff, hash);
+		if (!h)
+			return 0;
+		if (IS_ERR(h))
+			return PTR_ERR(h);
+	}
+	ct = nf_ct_tuplehash_to_ctrack(h);
+```
+Figure X. Located at [`net/netfilter/nf_conntrack_core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_core.c#L1846).
+
+It first calls `nf_ct_get_tuple` to build the `tuple` which copies the source
+and destination IP addresses, TCP/UDP ports to the header, and sets the packet
+direction, `IP_CT_DIR_ORIGINAL`.  Finally, it returns `true`.
+
+```c
+static bool
+nf_ct_get_tuple(const struct sk_buff *skb,
+		unsigned int nhoff,
+		unsigned int dataoff,
+		u_int16_t l3num,
+		u_int8_t protonum,
+		struct net *net,
+		struct nf_conntrack_tuple *tuple)
+{
+.
+	tuple->dst.dir = IP_CT_DIR_ORIGINAL;
+.
+}
+```
+Figure X. Located at [`net/netfilter/nf_conntrack_core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_core.c#L267).
+
+Next, `resolve_normal_ct` calls `nf_ct_zone_tmpl` to identified the `zone` on which
+the packet arrived. Zones are similar to network namespaces, but lighter-weight. They
+are used to handle the case where a device has multiple interfaces with the
+same IP address, which can happen [link](https://lore.kernel.org/all/4B9158F5.5040205@parallels.com/T/).
+The zone is based on the direction, `IP_CT_DIR_ORIGINAL`, a set of flags (0), and 
+the packet mark, `skbAtk->mark`.
+
+```c
+static inline const struct nf_conntrack_zone *
+nf_ct_zone_init(struct nf_conntrack_zone *zone, u16 id, u8 dir, u8 flags)
+{
+	zone->id = id;
+	zone->flags = flags;
+	zone->dir = dir;
+
+	return zone;
+}
+
+static inline const struct nf_conntrack_zone *
+nf_ct_zone_tmpl(const struct nf_conn *tmpl, const struct sk_buff *skb,
+		struct nf_conntrack_zone *tmp)
+{
+#ifdef CONFIG_NF_CONNTRACK_ZONES
+	if (!tmpl)
+		return &nf_ct_zone_dflt;
+
+	if (tmpl->zone.flags & NF_CT_FLAG_MARK)
+		return nf_ct_zone_init(tmp, skb->mark, tmpl->zone.dir, 0);
+#endif
+	return nf_ct_zone(tmpl);
+}
+```
+Figure X. Located at [`net/netfilter/nf_conntrack_zones.h`](https://github.com/torvalds/linux/blob/master/include/net/netfilter/nf_conntrack_zones.h#L29).
+
+The zone ends up getting identified by the `skb-mark`, which is currently 0
+because this is the first time the packet has arrived. The siphash for the
+conntrack entry is computed bucket in the `nf_conntrack_hash` table
+where the entry resides or will resides if this is the first time
+this packet from this zone has been seen.
+
+```c
+static u32 hash_conntrack_raw(const struct nf_conntrack_tuple *tuple,
+			      unsigned int zoneid,
+			      const struct net *net)
+{
+.
+	key = nf_conntrack_hash_rnd;
+
+	key.key[0] ^= zoneid;
+	key.key[1] ^= net_hash_mix(net);
+.
+}
+```
+Figure X. Conntrack hash. Conntrack hash. Located at [`net/netfilter/nf_conntrack_core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_core.c#L210).
+
+The hash value will yield either an empty bucker or no entry that matches the
+connection tuple for `skbAtk`, which is [[`10.8.0.4:1337,1.1.1.1:80`],[`atkMac, wlanMac`]].
+While the attacker's packet does patch this from the connection's point of view,
+it does not match either the `ORIGINAL` or `REPLY` directions of the tuple stored in
+`nf_conntrack_hash`.
+
+```c
+static inline bool
+nf_ct_key_equal(struct nf_conntrack_tuple_hash *h,
+		const struct nf_conntrack_tuple *tuple,
+		const struct nf_conntrack_zone *zone,
+		const struct net *net)
+{
+	struct nf_conn *ct = nf_ct_tuplehash_to_ctrack(h);
+
+	/* A conntrack can be recreated with the equal tuple,
+	 * so we need to check that the conntrack is confirmed
+	 */
+	return nf_ct_tuple_equal(tuple, &h->tuple) &&
+	       nf_ct_zone_equal(ct, zone, NF_CT_DIRECTION(h)) &&
+	       nf_ct_is_confirmed(ct) &&
+	       net_eq(net, nf_ct_net(ct));
+}
+```
+
+Because `skbAtk` doesn't match conntrack entries for either direction,
+`init_conntrack` is called to add the tuple to the `nf_conntrack_hash`.
+There is a large amount of concurrency happening in this code,
+and conntrack attempts to handle situations where pointers may get
+removed or added because of difference in reference counting during 
+the addition of the new tuple, see [`net/netfilter/nf_conntrack_core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_core.c#L1822)
+
+The `nf_conntrack_hash` now looks like:
+
+```c
+nf_conntrack_hash = [orig:{10.8.0.5:1337, 1.1.1.1:80}, reply:{1.1.1.1:80, 192.168.0.5:1337}
+                     orig:{1.1.1.1:80, 10.8.0.5:1337}, reply:{10.8.0.5:1337, 1.1.1.1:80} ]
+
+```
+Figure X. `nf_conntrack_hash` after `skbAtk` tuple is inserted into it.
+
+
+
+
+
+### `NF_HOOK` Returns `PASS`
+
 ```bash
 emac_mac_rx_process(napi,budget)
 -emac_mac_rx_process(adpt, rx_q, &work_done, budget)
