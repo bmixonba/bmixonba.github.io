@@ -1992,6 +1992,7 @@ emac_mac_rx_process(napi,budget)
 Figure X. Function call stack after call to `emac_mac_rx_process`
 
 The validation is performed by `__fib_validate_source`.
+
 ```c
 static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 				 dscp_t dscp, int oif, struct net_device *dev,
@@ -2052,7 +2053,10 @@ emac_mac_rx_process(napi,budget)
 Figure X. Function call stack after call to `emac_mac_rx_process`
 
 
-`ip_mkroute_input` is called.
+Next, `ip_mkroute_input` is called. This is a wrapper to handle kernels compiled
+with multi-path routing support. Next, the value of `__ip_mkroute_input` is returned.
+and the routing result is copied into `res`. 
+
 ```c
 
 static enum skb_drop_reason
@@ -2109,6 +2113,11 @@ TODO:
 
 1. Does android have multipath configured?
 
+Because `skbAtk` arrived on `wlan0`, the forwarding path is taken.
+The `ip_foward` function is copied to the appropriate data structures
+and the destination interface for the next hop (`tun1`) is copied to
+`skbAtk`.
+
 ```c
 /* called in rcu_read_lock() section */
 static enum skb_drop_reason
@@ -2134,6 +2143,7 @@ cleanup:
 }
 ```
 Figure X. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L1797).
+
 
 ```bash
 emac_mac_rx_process(napi,budget)
@@ -2173,8 +2183,7 @@ Figure X. Function call stack after call to `emac_mac_rx_process`
 Netfilter calling points for different tables and default chains.
 (Original source at [Wikipedia](https://upload.wikimedia.org/wikipedia/commons/3/37/Netfilter-packet-flow.svg))
 
-
-The packet is then delivered to the upper layer protocol (TCP or UDP).
+The function returns and `ip_forward` is called
 
 ```c
 static inline int dst_input(struct sk_buff *skb)
@@ -2184,6 +2193,12 @@ static inline int dst_input(struct sk_buff *skb)
 }
 ```
 Figure X. [net/dst.h](https://github.com/torvalds/linux/blob/master/include/net/dst.h#L467)
+
+The `INDIRECT_CALL_INET` function checks to see if the `dst` entry's `input`
+function is the same as either of the functions passed to it. If they are equal
+then one of those is called, otherwise `dst->input` is called. In the previous
+function, `dst->input` was set to `ip_forward`, so `skbAtk` takes the IP
+forwarding path.
 
 ```bash
 emac_mac_rx_process(napi,budget)
@@ -2213,10 +2228,64 @@ emac_mac_rx_process(napi,budget)
 -----------------__fib_validate_source(skbAtk, src, dst, dscp, oif, dev, r, idev,itag)
 -----------------ip_mkroute_input(skbAtk, res, in_dev, daddr, saddr, dscp,flkeys)
 ------------------__mkroute_input(skbAtk, res, in_dev, daddr, saddr, dscp)
--------------------dst_input(skbAtk)
---------------------ip_local_deliver(skbAtk)
+-----------------dst_input(skbAtk)
+------------------ip_forward(skbAtk)
 ```
 Figure X. Function call stack after call to `emac_mac_rx_process`
+
+
+```c
+int ip_forward(struct sk_buff *skb)
+{
+	u32 mtu;
+	struct iphdr *iph;	/* Our header */
+	struct rtable *rt;	/* Route we use */
+.
+	net = dev_net(skb->dev);
+.
+	if (ip_hdr(skb)->ttl <= 1)
+		goto too_many_hops;
+.
+	rt = skb_rtable(skb);
+.
+	mtu = ip_dst_mtu_maybe_forward(&rt->dst, true);
+	if (ip_exceeds_mtu(skb, mtu)) {
+		IP_INC_STATS(net, IPSTATS_MIB_FRAGFAILS);
+		icmp_send(skb, ICMP_DEST_UNREACH, ICMP_FRAG_NEEDED,
+			  htonl(mtu));
+.
+	/* Decrease ttl after skb cow done */
+	ip_decrease_ttl(iph);
+.
+	if (IPCB(skb)->flags & IPSKB_DOREDIRECT && !opt->srr &&
+	    !skb_sec_path(skb))
+		ip_rt_send_redirect(skb);
+.
+	return NF_HOOK(NFPROTO_IPV4, NF_INET_FORWARD,
+		       net, NULL, skb, skb->dev, rt->dst.dev,
+		       ip_forward_finish);
+.
+sr_failed:
+	icmp_send(skb, ICMP_DEST_UNREACH, ICMP_SR_FAILED, 0);
+.
+too_many_hops:
+	icmp_send(skb, ICMP_TIME_EXCEEDED, ICMP_EXC_TTL, 0);
+}
+```
+Figure X. `ip_forward` function taken by `skbAtk`. Located at [`net/ipv4/ip_forward.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_forward.c#L83)
+
+
+### `NF_INET_FORWARD` hooks called
+
+Now that we have finally reached the fowarding path, the hooks attached
+to the `FORWARD` chain will be invoked. In particular, the `routectrl_MANGLE`
+hooks will be invoked in the `mangle` table will be called, and it is these
+hooks that add the `fwmark` to `skbAtk`.
+
+
+# TODO: Local Delivery
+
+The packet is then delivered to the upper layer protocol (TCP or UDP).
 
 
 ```c
