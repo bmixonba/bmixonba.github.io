@@ -1170,6 +1170,8 @@ Figure 34. Main receive function for tunnel device. Defined in [`driver/net/tun.
 
 ## Network Layer
 
+### `INET` Receive Path
+
 After the packets have been aggregated and passed up the network stack through
 GRO, the `ip_rcv` function is called. Recall that it is not called directly,
 but through the `ip_packet_type` registered with the kernel. 
@@ -1358,8 +1360,6 @@ The `ip_rcv_finish` function is responsible for checking whether the "ingress
 device is enslaved to an L3 master", otherwise, it calls the actual routing
 code, `ip_rcv_finish_core`.
 
-
-
 ```c
 static int ip_rcv_finish_core(struct net *net,
 			      struct sk_buff *skb, struct net_device *dev,
@@ -1458,8 +1458,6 @@ emac_mac_rx_process(napi,budget)
 ---------------ip_route_input_rcu(skb, daddr, saddr, dscp, dev, &res)
 ```
 Figure X. Function call stack after call to `emac_mac_rx_process`
-
-
 
 ```c
 struct fib_result {
@@ -2233,6 +2231,7 @@ emac_mac_rx_process(napi,budget)
 ```
 Figure X. Function call stack after call to `emac_mac_rx_process`
 
+### `INET` Forwarding Path from `wlan0` to `tun1`
 
 ```c
 int ip_forward(struct sk_buff *skb)
@@ -2272,16 +2271,51 @@ too_many_hops:
 	icmp_send(skb, ICMP_TIME_EXCEEDED, ICMP_EXC_TTL, 0);
 }
 ```
-Figure X. `ip_forward` function taken by `skbAtk`. Located at [`net/ipv4/ip_forward.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_forward.c#L83)
+Figure X. `ip_forward` function taken by `skbAtk`. Located at
+[`net/ipv4/ip_forward.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_forward.c#L83)
 
+I included the packet mangling from `ip_decrease_ttl` and the calls to various
+`icmp` functions because I find it interesting that these functions because it
+seems like a strange place to invoke side effects like these. 
 
-### `NF_INET_FORWARD` hooks called
+### Netfilter `NF_INET_FORWARD` Hooks 
 
 Now that we have finally reached the fowarding path, the hooks attached
-to the `FORWARD` chain will be invoked. In particular, the `routectrl_MANGLE`
+to the `FORWARD` chain will be invoked. There are only two rules for the forwarding path,
+listed below:
+
+```c
+-P FORWARD ACCEPT -c 0 0
+-N tetherctrl_mangle_FORWARD
+-A FORWARD -c 0 0 -j tetherctrl_mangle_FORWARD
+-A tetherctrl_mangle_FORWARD -p tcp -m tcp --tcp-flags SYN SYN -c 0 0 -j TCPMSS --clamp-mss-to-pmtu
+```
+This rules matches all `tcp` packets with only the `SYN` flag set (I think).
+When this is true, Netfilter will clamp or limit the path MTU of the packet of
+the initial TCP connections by modifying the TCP MSS (maximum segment size)
+value.  From the looks of it, no TCP-based tunnel have been running, so all of
+the counters are 0 for the forwarding chain.
+
+### `NF_INET_LOCAL_IN` hooks called
+
+In particular, the `routectrl_MANGLE`
 hooks will be invoked in the `mangle` table will be called, and it is these
 hooks that add the `fwmark` to `skbAtk`.
+i
+```c
+ 463 -A INPUT -c 2583 728114 -j connmark_mangle_INPUT
+ 464 -A INPUT -c 2583 728114 -j wakeupctrl_mangle_INPUT
+ 465 -A INPUT -c 2583 728114 -j routectrl_mangle_INPUT
+.
+-A connmark_mangle_INPUT -m connmark --mark 0x0/0xfffff -c 262 19122 -j CONNMARK --save-mark --nfmask 0xfffff --ctmask 0xfffff
+-A routectrl_mangle_INPUT -i wlan0 -c 1991 324525 -j MARK --set-xmark 0x30066/0x7fefffff
+-A routectrl_mangle_INPUT -i tun1 -c 102 37610 -j MARK --set-xmark 0x30068/0x7fefffff
+.
+-A wakeupctrl_mangle_INPUT -i wlan0 -m mark --mark 0x80000000/0x80000000 -m limit --limit 10/sec -c 295 15316 -j NFLOG --nflog-prefix "44     1492361229:wlan0" --nflog-group 3 --nflog-threshold 8
+-A wakeupctrl_mangle_INPUT -i tun1 -m mark --mark 0x80000000/0x80000000 -m limit --limit 10/sec -c 0 0 -j NFLOG --nflog-prefix "450082295     821:tun1" --nflog-group 3 --nflog-threshold 8
 
+```
+Figure X. Netfilter rules for the `INPUT` chain.
 
 # TODO: Local Delivery
 
