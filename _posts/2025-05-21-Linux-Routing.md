@@ -360,7 +360,7 @@ Take the following routing rule as an example:
 Figure 11. Example routing rule.
 
 This rule states that any incoming packets (`from all`) that are locally
-generated ('iff lo`) and destined for the wifi interface (`oif wlan0`) with the
+generated (`iff lo`) and destined for the wifi interface (`oif wlan0`) with the
 root uid (`uidrange 0-0`) should lookup the routing rules in the `wlan0`
 network (`lookup wlan0`).
 
