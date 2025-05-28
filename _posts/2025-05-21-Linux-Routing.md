@@ -1414,10 +1414,8 @@ emac_mac_rx_process(napi,budget)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
 --------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
---------------skb_rtable(skb)
 ```
 Figure X. Function call stack after call to `emac_mac_rx_process`
-
 
 ```c
 enum skb_drop_reason ip_route_input_noref(struct sk_buff *skb, __be32 daddr,
@@ -1456,6 +1454,8 @@ emac_mac_rx_process(napi,budget)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
+--------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skb, daddr, saddr, dscp, dev, &res)
 ```
 Figure X. Function call stack after call to `emac_mac_rx_process`
 
@@ -1507,6 +1507,28 @@ ip_route_input_rcu(struct sk_buff *skb, __be32 daddr, __be32 saddr,
 }
 ```
 Figure 45. `ip_route_input_rcu`. Located at [`net/ipv4/route.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/route.c#L2474).
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+-------------ip_rcv_finish_core(net, skb, dev, NULL)
+--------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skb, daddr, saddr, dscp, dev, &res)
+----------------ip_route_input_slow(skb, daddr, saddr, dscp, dev, res)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 
 ```c
 /*
@@ -1581,6 +1603,29 @@ For `skbAtk`, `skbAtk->mark == 0x0` because there no `PREROUTING` hooks have
 been registered. `uid` be `net` the kernel's uid (0), because this is an
 unsoliciated incoming packet and is not associated with any sockets.
 
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+-------------ip_rcv_finish_core(net, skb, dev, NULL)
+--------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skb, daddr, saddr, dscp, dev, &res)
+----------------ip_route_input_slow(skb, daddr, saddr, dscp, dev, res)
+-----------------fib_lookup(net, &fl4, res, 0)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 The call to `fib_lookup` finds the correct route for the incoming packet.
 `fib_lookup` has two definitions, one for when the kernel supports only one
 routing table, and one for when multiple tables are available.
@@ -1628,6 +1673,29 @@ Because I am assuming the policy-routing rules for Android,
 the `net->ipv4.fib_has_custom_rules` predicate evaluates to true and `__fib_lookup`
 is called.
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+-------------ip_rcv_finish_core(net, skb, dev, NULL)
+--------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skb, daddr, saddr, dscp, dev, &res)
+----------------ip_route_input_slow(skb, daddr, saddr, dscp, dev, res)
+-----------------fib_lookup(net, &fl4, res, 0)
+------------------__fib_lookup(net, flp, res, flags)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 ```c
 int __fib_lookup(struct net *net, struct flowi4 *flp,
 		 struct fib_result *res, unsigned int flags)
@@ -1645,6 +1713,30 @@ the device. Because this isn't the case, `fib_rules_lookup` is called
 along with the `ipv4.rules_ops` which will be `rules_ops_wlan0` since 
 `skbAtk` came in on `wlan0`.
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+-------------ip_rcv_finish_core(net, skb, dev, NULL)
+--------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skb, daddr, saddr, dscp, dev, &res)
+----------------ip_route_input_slow(skb, daddr, saddr, dscp, dev, res)
+-----------------fib_lookup(net, &fl4, res, 0)
+------------------__fib_lookup(net, flp, res, flags)
+------------------fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 `fib_rules_lookup` loops through each of the `fib_rules_ops` and 
 checks whether any of them patch the `fl` field.
 
@@ -1660,12 +1752,12 @@ jumped:
 			continue;
 .
 .
-		if (!fib_rule_match(rule, ops, fl, flags, arg))
-			continue;
+		else
+			err = INDIRECT_CALL_MT(ops->action,
 					       fib6_rule_action,
 					       fib4_rule_action,
 					       rule, fl, flags, arg);
-
+.
 }
 ```
 Figure 49. in `fig_rules.c` Line [108](https://github.com/torvalds/linux/blob/master/net/ipv4/fib_rules.c#L108)
@@ -1678,6 +1770,33 @@ Netfilter. There is also no `tun_id`, because the packet was not received on
 a kernel-defined tunnel. The only match that will occur for `wlan0` is related
 to the uid `fl->flowi_uid==skb->dev->net->user_ns->uid=0`, so the call to
 `fib4_rule_match` occurs.
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+-------------ip_rcv_finish_core(net, skb, dev, NULL)
+--------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skb, daddr, saddr, dscp, dev, &res)
+----------------ip_route_input_slow(skb, daddr, saddr, dscp, dev, res)
+-----------------fib_lookup(net, &fl4, res, 0)
+------------------__fib_lookup(net, flp, res, flags)
+------------------fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg)
+-------------------fib_rule_match(rule, ops, fl, flags, arg)
+--------------------fib4_rule_action(rule, fl, flags, arg)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 
 ```c
 static int fib_rule_match(struct fib_rule *rule, struct fib_rules_ops *ops,
