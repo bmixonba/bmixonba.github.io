@@ -652,7 +652,8 @@ struct fib_rules_ops rules_ops_tun1 = {
 ```
 Figure 18. Routing data structure used for this post.
 
-# Packet Reception
+
+# Attacker Spoofs TCP Packet to a Live Connection
 
 After `A` (me) spoofs the packet, `skbAtk`, to `T` (you), the digital
 represetion is transformed into an analogue (electircal or luminal) signal that
@@ -1220,8 +1221,7 @@ Figure 36. `ip_rcv_core` is mainly used for book keeping and sanity checking the
 
 After `skbAtk` is confirmed to be legit and the appropriate book keeping has
 been done (e.g., `transport_header` pointer for `skbAtk` has been updated),
-`ip_rcv` calls `ip_rcv_finish` as a function to be called after the rules in
-`Netfilter`'s `PREROUTING` hook have been executed. From what I can tell,
+`ip_rcv` hooks `ip_rcv_finish` using  `Netfilter`'s `PREROUTING` hook. From what I can tell,
 unlike the classic `Netfilter` diagram that shows the `PREROUTING` chains being
 called in the Link Layer (Bridge layer in the diagram), it is actually called for the first
 time just before the IP layer makes any routing decisions. 
@@ -1241,8 +1241,8 @@ NF_HOOK(uint8_t pf, unsigned int hook, struct net *net, struct sock *sk, struct 
 ```
 Figure 37. Located at [`include/linux/netfilter.h`](https://github.com/torvalds/linux/blob/master/include/linux/netfilter.h#L307).
 
-`NF_HOOK` wraps for the underlying `nf_hook` function that
-handles the return codes for the Netfilter hooks and ultimately calls
+`NF_HOOK` is a wrapper for the underlying `nf_hook` function that
+handles the return codes for the Netfilter hooks and calls
 `ip_rcv_finish` if the packet is allowed to `PASS`. For any other return code, 
 the hook consumes the `skb`
 
@@ -1259,6 +1259,9 @@ currently `NULL`. This will be assigned later when the routing table is looked u
 
 #### `Questions`
 1. Where and when is the device's network name space `dev` initialized?
+1.1. Possible answer: when a driver allocates a `net_device` struct.
+2. What is the network namespace initialized to?
+2.1. Possible answer: `net_init`.
 
 ```c
 /**
@@ -1325,19 +1328,6 @@ Android.
 `TODO:`
 1. Add some hooks related to PREROUTING.
 2. Maybe talk about the hook registration process?
-
-```c
-static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
-{
-	struct net_device *dev = skb->dev;
-	int ret;
-.
-	ret = ip_rcv_finish_core(net, skb, dev, NULL);
-.
-```
-Figure 40. The function called by the Netfilter hook code, `okfn` when the
-packet is allowed the "PASS". Located at
-[`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L433).
 
 ### `NF_INET_PRE_ROUTING` Path called
 
@@ -1484,7 +1474,7 @@ resolve_normal_ct(struct nf_conn *tmpl,
 ```
 Figure X. Located at [`net/netfilter/nf_conntrack_core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_core.c#L1846).
 
-It first calls `nf_ct_get_tuple` to build the `tuple` which copies the source
+It calls `nf_ct_get_tuple` to build the `tuple` which copies the source
 and destination IP addresses, TCP/UDP ports to the header, and sets the packet
 direction, `IP_CT_DIR_ORIGINAL`.  Finally, it returns `true`.
 
@@ -1560,9 +1550,9 @@ static u32 hash_conntrack_raw(const struct nf_conntrack_tuple *tuple,
 ```
 Figure X. Conntrack hash. Conntrack hash. Located at [`net/netfilter/nf_conntrack_core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_core.c#L210).
 
-The hash value will yield either an empty bucker or no entry that matches the
+The hash value will yield either an empty bucket or no entry that matches the
 connection tuple for `skbAtk`, which is [[`10.8.0.4:1337,1.1.1.1:80`],[`atkMac, wlanMac`]].
-While the attacker's packet does patch this from the connection's point of view,
+While the attacker's packet does match this from the connection's (i.e., socket) point of view,
 it does not match either the `ORIGINAL` or `REPLY` directions of the tuple stored in
 `nf_conntrack_hash`.
 
@@ -1586,26 +1576,130 @@ nf_ct_key_equal(struct nf_conntrack_tuple_hash *h,
 ```
 
 Because `skbAtk` doesn't match conntrack entries for either direction,
-`init_conntrack` is called to add the tuple to the `nf_conntrack_hash`.
-There is a large amount of concurrency happening in this code,
-and conntrack attempts to handle situations where pointers may get
-removed or added because of difference in reference counting during 
-the addition of the new tuple, see [`net/netfilter/nf_conntrack_core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_core.c#L1822)
+`init_conntrack` is called to allocate a new conntrack entry. The
+entry is then added to the `nf_ct_expect_hash` table which is a table
+of entries that are expecte to have connections. The tuple is also
+associated with a `skb` object. The conntrack entry is also associated
+with the conntrack network namespace. The `IPS_EXPECTED_BIT` bit of `ct->status`
+bits field is set, indicating to conntrack that it expects a response for
+this entry in the reply direction. The conntrack mark (and I don't know if this
+is the same or different from `skb->mark`) and the `secmark` are propagated.
 
-The `nf_conntrack_hash` now looks like:
+There is a large amount of concurrency happening in this code,
+and conntrack attempts to handle situations where pointers to `skb` may get
+removed or added because of difference in reference counts during 
+the the insertion of the newly expected connection,  see [`net/netfilter/nf_conntrack_core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_core.c#L1822)
 
 ```c
-nf_conntrack_hash = [orig:{10.8.0.5:1337, 1.1.1.1:80}, reply:{1.1.1.1:80, 192.168.0.5:1337}
-                     orig:{1.1.1.1:80, 10.8.0.5:1337}, reply:{10.8.0.5:1337, 1.1.1.1:80} ]
+static noinline struct nf_conntrack_tuple_hash *
+init_conntrack(struct net *net, struct nf_conn *tmpl,
+	       const struct nf_conntrack_tuple *tuple,
+	       struct sk_buff *skb,
+	       unsigned int dataoff, u32 hash)
+{
+.
+	ct = __nf_conntrack_alloc(net, zone, tuple, &repl_tuple, GFP_ATOMIC,
+				  hash);
+.
+	cnet = nf_ct_pernet(net);
+	if (cnet->expect_count) {
+		spin_lock_bh(&nf_conntrack_expect_lock);
+		exp = nf_ct_find_expectation(net, zone, tuple, !tmpl || nf_ct_is_confirmed(tmpl));
+		if (exp) {
+			/* Welcome, Mr. Bond.  We've been expecting you... */
+			__set_bit(IPS_EXPECTED_BIT, &ct->status);
+.
+#ifdef CONFIG_NF_CONNTRACK_MARK
+			ct->mark = READ_ONCE(exp->master->mark);
+#endif
+#ifdef CONFIG_NF_CONNTRACK_SECMARK
+			ct->secmark = exp->master->secmark;
+#endif
+.
+	/* Other CPU might have obtained a pointer to this object before it was
+	 * released.  Because refcount is 0, refcount_inc_not_zero() will fail.
+	 *
+	 * After refcount_set(1) it will succeed; ensure that zeroing of
+	 * ct->status and the correct ct->net pointer are visible; else other
+	 * core might observe CONFIRMED bit which means the entry is valid and
+	 * in the hash table, but its not (anymore).
+	 */
+	smp_wmb();
 
+	/* Now it is going to be associated with an sk_buff, set refcount to 1. */
+	refcount_set(&ct->ct_general.use, 1);
+
+	if (exp) {
+		if (exp->expectfn)
+			exp->expectfn(ct, exp);
+		nf_ct_expect_put(exp);
+	}
+
+	return &ct->tuplehash[IP_CT_DIR_ORIGINAL];
+}
+```
+Figure X. Function to add (via `nf_ct_expect_put`, to conntrack table. Located at [`net/netfilter/nf_conntrack_core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_core.c#L1744).
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skb)
+```
+Figure X. Current function call stack in Netfilter hooks.
+
+Once the new entry is allocated, `init_conntrack` returns the hash
+of the tuple in the `ORIGINAL` direction. The tuple, `ct`, is then retrived
+using the tuple hash, and the `IP_CT_NEW` bit of the status bitfield is set
+and the `skbAtk->_nfct` bitfield has the hash and status bits added to it
+using `nf_ct_set(skbAtk, ct, ctinfo)`. `nf_conntack_in` then calls `nf_ct_get`
+with the newly set `skbAtk->_nfct` bits set, and is ready to process handle
+transport-layer protocols. 
+
+## Netfilter: Transport Layer Protocol Processing
+
+
+Once the transport layer protocol has been handled, the new
+conntrack entry is added to `nf_conntrack_hash`. If more hooks
+are present in the `PREROUTING` chain, they will be called. In
+this case, there is another hook that does not impact the
+attack (at least I don't think), so control returns to `nf_hook_slow`
+
+The `nf_conntrack_hash` table now looks like:
+
+```c
+nf_conntrack_hash = [orig:{10.8.0.5:1337, 1.1.1.1:80}, reply:{1.1.1.1:80, 192.168.0.5:1337} <- Legitimate connection
+                     orig:{1.1.1.1:80, 10.8.0.5:1337}, reply:{10.8.0.5:1337, 1.1.1.1:80} ]  <- Attacker's packet
 ```
 Figure X. `nf_conntrack_hash` after `skbAtk` tuple is inserted into it.
 
+### `NF_INET_PRE_ROUTING` Hooks Return `PASS`
 
+After the `NF_INET_PRE_ROUTING` hooks have all returned `PASS`, `okfn` is
+called. `okfn` is `ip_rcv_finish`.
 
+```c
+static int ip_rcv_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	struct net_device *dev = skb->dev;
+	int ret;
+.
+	ret = ip_rcv_finish_core(net, skb, dev, NULL);
+.
+```
+Figure 40. The function called by the Netfilter hook code, `okfn` when the
+packet is allowed the "PASS". Located at
+[`net/ip_input.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_input.c#L433).
 
-
-### `NF_HOOK` Returns `PASS`
 
 ```bash
 emac_mac_rx_process(napi,budget)
@@ -2682,14 +2776,16 @@ emac_mac_rx_process(napi,budget)
 Figure X. Function call stack after call to `emac_mac_rx_process`
 
 
-# Lifetime of a packet
 
-There are three primary situations in which the routing code is invoked, when
-the Linux machine is a Server, a Client, and a Router. The following
-subsections will take us through the lifetime of a packet as it traverses the
-Linux kernel.
+# Target Establishes a Connection to `1.1.1.1`
 
-## Server: Remote to Local
+Assume initially that the target, `T`, already has an established VPN tunnel.
+Now they want to talk to remote server `1.1.1.1` on port 80 over TCP. Their
+web browser initially opens a socket. I will not cover the details from 
+
+TODO: Write this and make it the first post in this series
+
+# VPN Server Forwards Packet
 
 When a user writes a server program, like OpenVPN, WireGuard, IPsec, or
 ShadowSocks, one of the primary functions invoked in user-space are the
@@ -2744,15 +2840,14 @@ Socket
  949     if (mark && setsockopt(sd, SOL_SOCKET, SO_MARK, (void *) &mark, sizeof(mark)) != 0)
 ```
 
-
-
 The input function will eventually call the `ip_route_output_slow` function to send the response
 out the proper device.
 
-##### Routing outgoing packets.
+## Routing outgoing packets.
+
+
 
 ```c
-
 const struct inet_connection_sock_af_ops ipv4_specific = {
 	.queue_xmit	   = ip_queue_xmit,
 	.send_check	   = tcp_v4_send_check,
@@ -3002,4 +3097,3 @@ static unsigned int selinux_ip_output(void *priv, struct sk_buff *skb,
 Figure X. SELinux `OUT` hook.[``](https://github.com/torvalds/linux/blob/master/security/selinux/hooks.c#L5905).
 
 
-## Router: Remote to Remote 
