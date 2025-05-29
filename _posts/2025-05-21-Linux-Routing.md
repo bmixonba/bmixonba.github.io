@@ -1254,6 +1254,24 @@ represents network name spaces. Network name spaces make it possible to
 implement different routing tables across multiple interfaces and implement the
 granular control of the `skb`, aka, policy-routing.
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skb, dev, NULL,ip_rcv_finish)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
+
 The `indev` is the Qualcomm device that received the packet while the `outdev` is
 currently `NULL`. This will be assigned later when the routing table is looked up.
 
@@ -1324,6 +1342,25 @@ Figure 39. Routine to loop through Netfilter rules. Details at [`net/netfilter/c
 Recall that Netfilter initializes its subsystem early. This includes the
 `conntrack` module, which is always registered, and `SELinux` in the case of
 Android.
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skbAtk, skbAtk->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 
 `TODO:`
 1. Add some hooks related to PREROUTING.
@@ -1420,6 +1457,26 @@ EXPORT_SYMBOL_GPL(nf_conntrack_in);
 ```
 Figure X. Located at [`net/netfilter/nf_conntrack_core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_core.c#L1998).
 
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skbAtk, skbAtk->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 `resolve_normal_ct` resolves the `skbAtk` to a conntrack tuple. 
 ```c
 /* On success, returns 0, sets skb->_nfct | ctinfo */
@@ -1477,6 +1534,28 @@ Figure X. Located at [`net/netfilter/nf_conntrack_core.c`](https://github.com/to
 It calls `nf_ct_get_tuple` to build the `tuple` which copies the source
 and destination IP addresses, TCP/UDP ports to the header, and sets the packet
 direction, `IP_CT_DIR_ORIGINAL`.  Finally, it returns `true`.
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skbAtk, skbAtk->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
+
 
 ```c
 static bool
@@ -1555,6 +1634,28 @@ connection tuple for `skbAtk`, which is [[`10.8.0.4:1337,1.1.1.1:80`],[`atkMac, 
 While the attacker's packet does match this from the connection's (i.e., socket) point of view,
 it does not match either the `ORIGINAL` or `REPLY` directions of the tuple stored in
 `nf_conntrack_hash`.
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skbAtk, skbAtk->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 ```c
 static inline bool
@@ -1640,6 +1741,7 @@ init_conntrack(struct net *net, struct nf_conn *tmpl,
 ```
 Figure X. Function to add (via `nf_ct_expect_put`, to conntrack table. Located at [`net/netfilter/nf_conntrack_core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_core.c#L1744).
 
+
 ```bash
 emac_mac_rx_process(napi,budget)
 -emac_mac_rx_process(adpt, rx_q, &work_done, budget)
@@ -1652,10 +1754,16 @@ emac_mac_rx_process(napi,budget)
 --------__netif_receive_skb_list(head)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
------------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
-------------ip_rcv_finish(net, sk, skb)
+-----------ip_rcv(skbAtk, skbAtk->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skb, dataoff, hash)
 ```
-Figure X. Current function call stack in Netfilter hooks.
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 Once the new entry is allocated, `init_conntrack` returns the hash
 of the tuple in the `ORIGINAL` direction. The tuple, `ct`, is then retrived
@@ -1667,6 +1775,141 @@ transport-layer protocols.
 
 ## Netfilter: Transport Layer Protocol Processing
 
+Because I am trying to see if you have a TCP connection
+to `1.1.1.1`, `nf_conntrack_handle_packet`'s TCP-handling
+function, `nf_conntrack_tcp_packet`, is invoked.
+
+```c
+/* Returns verdict for packet, or -1 for invalid. */
+static int nf_conntrack_handle_packet(struct nf_conn *ct,
+				      struct sk_buff *skb,
+				      unsigned int dataoff,
+				      enum ip_conntrack_info ctinfo,
+				      const struct nf_hook_state *state)
+{
+	switch (nf_ct_protonum(ct)) {
+	case IPPROTO_TCP:
+		return nf_conntrack_tcp_packet(ct, skb, dataoff,
+					       ctinfo, state); 
+.
+```
+Figure X. Transport layer handling function. Located at [`net/netfilter/nf_conntrack_core.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_core.c#L1956).
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skbAtk, skbAtk->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skb, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skb, dataoff, ctinfo, state)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`.
+
+
+```c
+/* Returns verdict for packet, or -1 for invalid. */
+int nf_conntrack_tcp_packet(struct nf_conn *ct,
+			    struct sk_buff *skb,
+			    unsigned int dataoff,
+			    enum ip_conntrack_info ctinfo,
+			    const struct nf_hook_state *state)
+{
+.
+	if (!nf_ct_is_confirmed(ct) && !tcp_new(ct, skb, dataoff, th, state))
+		return -NF_ACCEPT;
+	spin_lock_bh(&ct->lock);
+	old_state = ct->proto.tcp.state;
+	dir = CTINFO2DIR(ctinfo);
+	index = get_conntrack_index(th);
+	// new_state = sIV = tcp_conntracks[NF_CT_ORIGINAL==0][RST==5][TCP_CONNTRACK_NONE==0]
+	new_state = tcp_conntracks[dir][index][old_state];
+
+	switch (new_state) {
+.
+	default:
+		/* Keep compilers happy. */
+		break;
+        }
+	res = tcp_in_window(ct, dir, index,
+			    skb, dataoff, th, state);
+	switch (res) {
+.
+	case NFCT_TCP_ACCEPT:
+		break;
+	}
+in_window:
+.
+	if (!test_bit(IPS_SEEN_REPLY_BIT, &ct->status)) {
+		/* If only reply is a RST, we can consider ourselves not to
+		   have an established connection: this is a fairly common
+		   problem case, so we can delete the conntrack
+		   immediately.  --RR */
+		if (th->rst) {
+			nf_ct_kill_acct(ct, ctinfo, skb);
+			return NF_ACCEPT;
+		}
+.
+        return NF_ACCEPT;
+}
+```
+Figure X. Located at [`net/netfilter/nf_conntrack_proto_tcp.c`](https://github.com/torvalds/linux/blob/master/net/netfilter/nf_conntrack_proto_tcp.c#L963).
+
+The checks to `nf_ct_is_confirmed` and `tcp_new` both evaluate to true. The
+former checks the `ct->status` bit field which as the `IP_CT_NEW` flag set.
+The latter has checks current and previous states of `ct` which should evaluate
+to `INVALID` but because Netfilter has to be liberal in what it accepts for
+connectivity purposes in Android, the packet is passed along. Next, it uses
+the state transition table, `tcp_conntracks` to lookup the next state for the
+packet. Because this is an unsolicited RST, the state is invalid (i.e., `sIV`),
+and the switch statement breaks out at under the default case.
+
+Next, it calls `tcp_in_window` to check whether the packet is in the receive window.
+This function has a lot of complex logic to handle, e.g., whether the packet is in 
+window that accounts for NAT sequence number mangling and whether the machine running 
+Conntrack was rebooted and is seeing the middle of a valid connection. It ultimately
+returns true. It then updates timers for the entry based on the new state and 
+status bits. It then checks to see whether its seens a reply, and because it has
+not and because the packet is an RST, the entry is deleted from the expected reply
+list `nf_ct_expect_hash` and the packet is let through the firewall.
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skb, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skb)
+----gro_skb_finish(gro, skb, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skb, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skbAtk, skbAtk->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 Once the transport layer protocol has been handled, the new
 conntrack entry is added to `nf_conntrack_hash`. If more hooks
@@ -1714,6 +1957,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skb)
 ```
 Figure X. Function call stack after call to `emac_mac_rx_process`
@@ -1773,6 +2025,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
 --------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
@@ -1814,6 +2075,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
 --------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
@@ -1881,6 +2151,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
 --------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
@@ -1977,6 +2256,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
 --------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
@@ -2046,6 +2334,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
 --------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
@@ -2086,6 +2383,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
 --------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
@@ -2144,6 +2450,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
 --------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
@@ -2269,6 +2584,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
 --------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
@@ -2336,6 +2660,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
 --------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
@@ -2396,6 +2729,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
 --------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
@@ -2452,6 +2794,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
 --------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
@@ -2518,6 +2869,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skb, skb->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skb)
 -------------ip_rcv_finish_core(net, skb, dev, NULL)
 --------------ip_route_input_noref(skb, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
@@ -2573,6 +2933,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skbAtk, skbAtk->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skbAtk)
 -------------ip_rcv_finish_core(net, skbAtk, dev, NULL)
 --------------ip_route_input_noref(skbAtk, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
@@ -2754,6 +3123,15 @@ emac_mac_rx_process(napi,budget)
 ---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
 ----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
 -----------ip_rcv(skbAtk, skbAtk->dev, pt_prev, orig_dev)
+------------NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,net, NULL, skbAtk, dev, NULL,ip_rcv_finish)
+-------------nf_hook_slow(skbAtk, &state, hook_head, 0)
+--------------ipv4_conntrack_in(*priv,skbAtk,&state)
+---------------nf_conntrack_in(skbAtk, &state)
+----------------resolve_normal_ct(tmpl,skbAtk,dataoff,protonum, &state)
+-----------------hash_conntrack_raw(&tuple, zone_id, state->net)
+-----------------init_conntrack(state->net, tmpl, &tuple, skbAtk, dataoff, hash)
+----------------nf_conntrack_handle_packet(ct, skbAtk, dataoff, ctinfo, state)
+-----------------nf_conntrack_tcp_packet(ct, skbAtk, dataoff, ctinfo, state)
 ------------ip_rcv_finish(net, sk, skbAtk)
 -------------ip_rcv_finish_core(net, skbAtk, dev, NULL)
 --------------ip_route_input_noref(skbAtk, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
