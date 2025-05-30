@@ -3011,9 +3011,10 @@ seems like a strange place to invoke side effects like these.
 
 ### Netfilter `NF_INET_FORWARD` Hooks 
 
-Now that we have finally reached the fowarding path, the hooks attached
-to the `FORWARD` chain will be invoked. There are only two rules for the forwarding path,
-listed below:
+Before the packet is forwarded to the `tun1`, Linux calls `NF_HOOK` again.
+This time the `NF_INET_FORWARD` hooks. The target Android device has one
+hook registered and it's related to TCP, but only when the TCP flags are set,
+so I won't walk through execution of that hook.
 
 ```c
 -P FORWARD ACCEPT -c 0 0
@@ -3028,6 +3029,95 @@ value.  From the looks of it, no TCP-based tunnel have been running, so all of
 the counters are 0 for the forwarding chain.
 
 ### `NF_INET_LOCAL_IN` hooks called
+
+After `NF_HOOK` returns `NF_ACCEPT`, `ip_forward_finish` is called. This
+function wraps the l3 master stuff, but since that doesn't apply to our case,
+`dst_output` is called, which, I think, just calls the output function of the
+dst_entry of `skbAtk`, which should be `ip_output`. I need to double check this
+because tun devices are a specific kind of software interface that have some
+difference that I don't currently fully understand.
+
+```c
+/* Output packet to network from transport.  */
+static inline int dst_output(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	return INDIRECT_CALL_INET(skb_dst(skb)->output,
+				  ip6_output, ip_output,
+				  net, sk, skb);
+}
+```
+Figure X. Output function that calls `ip_output`. Located at [`net/ipv4/ip_forward.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_forward.c#L65).
+
+The `ip_output` function saves the device on which the packet arrived in a seperate
+variable and then updates `skbAtk->dev` with the output device, `tun1`.
+
+```c
+int ip_output(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	struct net_device *dev = skb_dst(skb)->dev, *indev = skb->dev;
+
+	skb->dev = dev;
+	skb->protocol = htons(ETH_P_IP);
+
+	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING,
+			    net, sk, skb, indev, dev,
+			    ip_finish_output,
+			    !(IPCB(skb)->flags & IPSKB_REROUTED));
+}
+EXPORT_SYMBOL(ip_output);
+```
+
+The Netfilter `POSTROUTING` hooks are then invoked similar to how the
+`PREROUTING` hook Conntrack registered with Netfilter. The test device has
+registered three new chains on the `POSTROUTING` chain's mangle table,
+`bw_mangle_POSTROUTING`, `idletimer_mangle_POSTROUTING`, and `oem_mangle_post`.
+The only chain that appears to modify the `skb` in any way is the
+`bw_mangle_POSTROUTING` uses the `MARK` module to remove the mark at bit at the
+1 position of the mask `0x100000` and save all of the other bits in the mask.
+
+```bash
+-P POSTROUTING ACCEPT -c 4171 370108
+-N bw_mangle_POSTROUTING
+-N idletimer_mangle_POSTROUTING
+-N oem_mangle_post
+-A POSTROUTING -c 4171 370108 -j oem_mangle_post
+-A POSTROUTING -c 4171 370108 -j bw_mangle_POSTROUTING
+-A POSTROUTING -c 4171 370108 -j idletimer_mangle_POSTROUTING
+-A bw_mangle_POSTROUTING -o ipsec+ -c 0 0 -j RETURN
+-A bw_mangle_POSTROUTING -m policy --dir out --pol ipsec -c 0 0 -j RETURN
+-A bw_mangle_POSTROUTING -c 4171 370108 -j MARK --set-xmark 0x0/0x100000
+-A bw_mangle_POSTROUTING -m bpf --object-pinned /sys/fs/bpf/netd_shared/prog_netd_skfilter_egress_xtbpf -c 4171 370108
+-A idletimer_mangle_POSTROUTING -o rmnet1 -c 0 0 -j IDLETIMER --timeout 10 --label 100 --send_nl_msg
+-A idletimer_mangle_POSTROUTING -o wlan0 -c 3495 291406 -j IDLETIMER --timeout 15 --label 102 --send_nl_msg
+-A idletimer_mangle_POSTROUTING -o rmnet2 -c 25 2535 -j IDLETIMER --timeout 10 --label 103 --send_nl_msg
+```
+Figure X. Test device's configured `POSTROUTING` hooks.
+
+
+
+`ip_finish_output` is then called to 
+
+```c
+static int ip_finish_output(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	int ret;
+
+	ret = BPF_CGROUP_RUN_PROG_INET_EGRESS(sk, skb);
+	switch (ret) {
+	case NET_XMIT_SUCCESS:
+		return __ip_finish_output(net, sk, skb);
+	case NET_XMIT_CN:
+		return __ip_finish_output(net, sk, skb) ? : ret;
+	default:
+		kfree_skb_reason(skb, SKB_DROP_REASON_BPF_CGROUP_EGRESS);
+		return ret;
+	}
+}
+```
+Figure X. Located at [`net/ipv4/ip_forward.c`](https://github.com/torvalds/linux/blob/master/net/ipv4/ip_forward.c#L65).
+
+
+
 
 In particular, the `routectrl_MANGLE`
 hooks will be invoked in the `mangle` table will be called, and it is these
@@ -3149,11 +3239,8 @@ emac_mac_rx_process(napi,budget)
 ------------------__mkroute_input(skbAtk, res, in_dev, daddr, saddr, dscp)
 -------------------dst_input(skbAtk)
 --------------------ip_local_deliver(skbAtk)
----------------------
 ```
-Figure X. Function call stack after call to `emac_mac_rx_process`
-
-
+Figure X. Function call stack after call to `emac_mac_rx_process`.
 
 # Target Establishes a Connection to `1.1.1.1`
 
