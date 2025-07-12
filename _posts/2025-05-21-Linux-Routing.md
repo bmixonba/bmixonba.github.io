@@ -2293,8 +2293,45 @@ listed below:
 This rules matches all `tcp` packets with only the `SYN` flag set (I think).
 When this is true, Netfilter will clamp or limit the path MTU of the packet of
 the initial TCP connections by modifying the TCP MSS (maximum segment size)
-value.  From the looks of it, no TCP-based tunnel have been running, so all of
+value. From the looks of it, no TCP-based tunnel have been running, so all of
 the counters are 0 for the forwarding chain.
+
+```bash
+emac_mac_rx_process(napi,budget)
+-emac_mac_rx_process(adpt, rx_q, &work_done, budget)
+--emac_receive_skb(rx_q, skbAtk, (u16)RRD_CVALN_TAG(&rrd),(bool)RRD_CVTAG(&rrd))
+---napi_gro_receive(&rx_q->napi, skbAtk)
+----gro_skb_finish(gro, skbAtk, dev_gro_receive(gro, skb))
+-----gro_normal_one(gro, skbAtk, 1)
+------gro_normal_list(gro)
+-------netif_receive_skb_list_internal(&gro->rx_list)
+--------__netif_receive_skb_list(head)
+---------__netif_receive_skb_list_core(&sublist, pfmemalloc)
+----------__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr)
+-----------ip_rcv(skbAtk, skbAtk->dev, pt_prev, orig_dev)
+------------ip_rcv_finish(net, sk, skbAtk)
+-------------ip_rcv_finish_core(net, skbAtk, dev, NULL)
+--------------ip_route_input_noref(skbAtk, iph->daddr, iph->saddr,ip4h_dscp(iph), dev)
+---------------ip_route_input_rcu(skbAtk, daddr, saddr, dscp, dev, &res)
+----------------ip_route_input_slow(skbAtk, daddr, saddr, dscp, dev, res)
+-----------------fib_lookup(net, &fl4, res, 0)
+------------------__fib_lookup(net, flp, res, flags)
+------------------fib_rules_lookup(net->ipv4.rules_ops, flowi4_to_flowi(flp), 0, &arg)
+-------------------fib_rule_match(rule, ops, fl, flags, arg)
+--------------------fib4_rule_action(rule, fl, flags, arg)
+---------------------fib_get_table(rule->fr_net, tb_id)
+----------------fib_validate_source_reason(skbAtk, saddr, daddr, dscp,0, dev, in_dev, &itag)
+-----------------__fib_validate_source(skbAtk, src, dst, dscp, oif, dev, r, idev,itag)
+-----------------ip_mkroute_input(skbAtk, res, in_dev, daddr, saddr, dscp,flkeys)
+------------------__mkroute_input(skbAtk, res, in_dev, daddr, saddr, dscp)
+-----------------dst_input(skbAtk)
+------------------ip_forward(skbAtk)
+-------------------NF_HOOK(NFPROTO_IPV4, NF_INET_FORWARD, net, NULL, skbAtk, skb->dev, rt->dst.dev, ip_forward_finish)
+--------------------nf_hook(NFPROTO_IPV4, NF_INET_FORWARD, net, NULL, skbAtk, skb->dev, rt->dst.dev, ip_forward_finish)
+---------------------nf_hook_slow(skb, &state, hook_head, 0)
+----------------------nf_hook_entry_hookfn(&e->hooks[s], skb, state)
+```
+Figure X. Function call stack after call to `emac_mac_rx_process`
 
 ### `NF_INET_LOCAL_IN` hooks called
 

@@ -22,6 +22,7 @@ author: Benjamin Mixon-Baca
 navbar-links:
   About Me: "aboutme"
   Research:
+    - Resume: "https://bmixonba.github.io/assets/imgs/ResumeMixonBacaBenjamin.pdf"
     - Attacking VPNs: "https://bmixonba.github.io/2025-05-20-PortShadow/"
     - Port Shadow: "https://breakpointingbad.com/2021/09/08/Port-Shadows-via-Network-Alchemy.html"
     - Russian Internet Censoship: "https://dl.acm.org/doi/pdf/10.1145/3517745.3561461"
