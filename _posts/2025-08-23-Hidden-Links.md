@@ -1,7 +1,7 @@
 # Hidden Links: Analyzing Secret Families of VPN Apps
 
 [Breakpointing Bad](https://breakpointingbad.com/) recently lead research
-efforts along with [The Center for Biocomputing, Security and Sociity at ASU](https://biodesign.asu.edu/biocomputing-security-and-society/) and [Citizen Lab](citizenlab.ca) 
+efforts along with [The Center for Biocomputing, Security and Society at ASU](https://biodesign.asu.edu/biocomputing-security-and-society/) and [Citizen Lab](citizenlab.ca) 
 to uncover hidden relationships between VPN apps popular on [Google Play](https://play.google.com/) and Apple App store.
 Our study focused on [Google Play](https://play.google.com/) store, though many of the VPNs we investigated were also available
 on Apple App Store. The tldr; is:
@@ -27,7 +27,7 @@ For more information, read the following links, including our original publicati
 
 # To Journalists 
 
-Please don't forget to give [Breakpointing Bad](https://breakpointingbad.com/) and [The Center for Biocomputing, Security and Sociity at ASU](https://biodesign.asu.edu/biocomputing-security-and-society/)
+Please don't forget to give [Breakpointing Bad](https://breakpointingbad.com/) and [The Center for Biocomputing, Security and Society at ASU](https://biodesign.asu.edu/biocomputing-security-and-society/)
 credit as for this work as well. No shade on [Citizen Lab](citizenlab.ca), they do
 great work, but small organizations like [Breakpointing Bad](https://breakpointingbad.com/)
 really benefit from the coverage and it helps ASU's research centers like BSS as well. 
