@@ -24,6 +24,7 @@ For more information, read the following links, including our original publicati
 3. [Forbes](https://www.forbes.com/sites/zakdoffman/2025/08/20/delete-every-app-thats-on-this-list-your-phone-will-be-tracked/)
 4. [Hackreader](https://hackread.com/citizen-lab-vpn-networks-sharing-ownership-security-flaws/) 
 5. [Helpnet](https://www.helpnetsecurity.com/2025/08/19/android-vpn-apps-used-by-millions-are-covertly-connected-and-insecure/) 
+6. [Threat Stop](https://www.threatstop.com/blog/hidden-risks-in-vpn-apps-why-third-party-vpns-put-your-network-at-risk)
 
 # To Journalists 
 
