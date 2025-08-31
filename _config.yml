@@ -25,6 +25,7 @@ navbar-links:
   Research:
     - Attacking VPNs: "https://bmixonba.github.io/2025-05-20-PortShadow/"
     - Port Shadow: "https://breakpointingbad.com/2021/09/08/Port-Shadows-via-Network-Alchemy.html"
+    - DEFCON Presentations: "https://media.defcon.org/DEF%20CON%2033/DEF%20CON%2033%20presentations/Benjamin%20Mixon-Baca%20-%20TSPU%20Russia%27s%20Firewall%20and%20Defending%20Against%20the%20Future%20of%20Digital%20Repression.pdf"
     - Russian Internet Censoship: "https://dl.acm.org/doi/pdf/10.1145/3517745.3561461"
     - Dynamic Taint Analysis: "https://par.nsf.gov/servlets/purl/10326847"
     - Network Side-channels: "https://arxiv.org/pdf/2406.06483"
