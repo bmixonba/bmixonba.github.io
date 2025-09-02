@@ -1,3 +1,11 @@
+# Hidden links
+
+* https://citizenlab.ca/2025/08/hidden-links-analyzing-secret-families-of-vpn-apps/
+* https://www.forbes.com/sites/zakdoffman/2025/08/20/delete-every-app-thats-on-this-list-your-phone-will-be-tracked/
+* https://hackread.com/citizen-lab-vpn-networks-sharing-ownership-security-flaws/
+* https://www.helpnetsecurity.com/2025/08/19/android-vpn-apps-used-by-millions-are-covertly-connected-and-insecure/
+* https://www.techradar.com/vpn/vpn-privacy-security/over-20-vpn-apps-with-700-million-users-found-to-have-undisclosed-links-and-security-vulnerabilities
+
 # Port Shadow
 
 * https://cyberinsider.com/port-shadow-attack-still-impacts-multiple-popular-vpn-products-on-linux/
@@ -23,10 +31,3 @@
 * https://www.securityweek.com/topics/port-shadow/
 * https://www.securityweek.com/port-shadow-attack-allows-vpn-traffic-interception-redirection/
 * https://www.threatstop.com/blog/hidden-risks-in-vpn-apps-why-third-party-vpns-put-your-network-at-risk
-
-# Hidden links
-
-* https://citizenlab.ca/2025/08/hidden-links-analyzing-secret-families-of-vpn-apps/
-* https://www.forbes.com/sites/zakdoffman/2025/08/20/delete-every-app-thats-on-this-list-your-phone-will-be-tracked/
-* https://hackread.com/citizen-lab-vpn-networks-sharing-ownership-security-flaws/
-* https://www.helpnetsecurity.com/2025/08/19/android-vpn-apps-used-by-millions-are-covertly-connected-and-insecure/
