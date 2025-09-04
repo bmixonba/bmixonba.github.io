@@ -1,10 +1,16 @@
 # Hidden links
 
-* https://citizenlab.ca/2025/08/hidden-links-analyzing-secret-families-of-vpn-apps/
 * https://www.forbes.com/sites/zakdoffman/2025/08/20/delete-every-app-thats-on-this-list-your-phone-will-be-tracked/
+* https://www.techradar.com/vpn/vpn-privacy-security/over-20-vpn-apps-with-700-million-users-found-to-have-undisclosed-links-and-security-vulnerabilities
+* https://www.malwarebytes.com/blog/news/2025/09/popular-android-vpn-apps-found-to-have-security-flaws-and-china-links
+* https://citizenlab.ca/2025/08/hidden-links-analyzing-secret-families-of-vpn-apps/
 * https://hackread.com/citizen-lab-vpn-networks-sharing-ownership-security-flaws/
 * https://www.helpnetsecurity.com/2025/08/19/android-vpn-apps-used-by-millions-are-covertly-connected-and-insecure/
-* https://www.techradar.com/vpn/vpn-privacy-security/over-20-vpn-apps-with-700-million-users-found-to-have-undisclosed-links-and-security-vulnerabilities
+* https://currently.att.yahoo.com/tech/vpn/articles/over-20-vpn-apps-700-133007527.html
+* https://social.cyware.com/news/citizen-lab-reports-hidden-vpn-networks-sharing-ownership-and-security-flaws-39926519
+* https://www.msn.com/en-gb/money/technology/over-20-vpn-apps-with-700-million-users-found-to-have-undisclosed-links-and-security-vulnerabilities/ar-AA1LJmlK
+* https://vulners.com/hackread/HACKREAD:310763E0002A60B5FB6A370871EABFD4
+* https://www.webpronews.com/citizen-lab-exposes-hidden-ties-in-20-android-vpn-apps-with-700m-downloads/
 
 # Port Shadow
 
