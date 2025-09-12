@@ -11,6 +11,8 @@
 * https://www.msn.com/en-gb/money/technology/over-20-vpn-apps-with-700-million-users-found-to-have-undisclosed-links-and-security-vulnerabilities/ar-AA1LJmlK
 * https://vulners.com/hackread/HACKREAD:310763E0002A60B5FB6A370871EABFD4
 * https://www.webpronews.com/citizen-lab-exposes-hidden-ties-in-20-android-vpn-apps-with-700m-downloads/
+* https://www.zdnet.com/article/security-woes-hidden-family-ties-exposed-in-popular-vpn-apps/
+* https://www.findarticles.com/study-links-top-free-vpn-apps-to-nefarious-third-party-practices/
 
 # Port Shadow
 
@@ -37,3 +39,7 @@
 * https://www.securityweek.com/topics/port-shadow/
 * https://www.securityweek.com/port-shadow-attack-allows-vpn-traffic-interception-redirection/
 * https://www.threatstop.com/blog/hidden-risks-in-vpn-apps-why-third-party-vpns-put-your-network-at-risk
+
+# TSPU
+
+* https://experts.azregents.edu/en/publications/tspu-russias-decentralized-censorship-system
